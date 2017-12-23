@@ -28,19 +28,44 @@ import functools
 
 def reg_len(regname):
     """
-    Return register length in bits
+    Returns register length in bits. CFA.arch must have been set, either
+    manually or by parsing a bincat output file.
     """
-    return {
-        "eax": 32, "ebx": 32, "ecx": 32, "edx": 32,
-        "esi": 32, "edi": 32, "esp": 32, "ebp": 32,
-        "ax": 16, "bx": 16, "cx": 16, "dx": 16,
-        "si": 16, "di": 16, "sp": 16, "bp": 16,
-        "cs": 16, "ds": 16, "es": 16, "ss": 16, "fs": 16, "gs": 16,
-        "iopl": 2,
-        "cf": 1, "pf": 1, "af": 1, "zf": 1, "sf": 1, "tf": 1, "if": 1,
-        "df": 1, "of": 1, "nt": 1, "rf": 1, "vm": 1, "ac": 1, "vif": 1,
-        "vip": 1, "id": 1,
-    }[regname]
+    if CFA.arch == "armv8":
+        return {
+            "x0": 64, "x1": 64, "x2": 64, "x3": 64, "x4": 64, "x5": 64,
+            "x6": 64, "x7": 64, "x8": 64, "x9": 64, "x10": 64, "x11": 64,
+            "x12": 64, "x13": 64, "x14": 64, "x15": 64, "x16": 64, "x17": 64,
+            "x18": 64, "x19": 64, "x20": 64, "x21": 64, "x22": 64, "x23": 64,
+            "x24": 64, "x25": 64, "x26": 64, "x27": 64, "x28": 64, "x29": 64,
+            "x30": 64, "sp": 64,
+            "q0": 128, "q1": 128, "q2": 128, "q3": 128, "q4": 128, "q5": 128,
+            "q6": 128, "q7": 128, "q8": 128, "q9": 128, "q10": 128, "q11": 128,
+            "q12": 128, "q13": 128, "q14": 128, "q15": 128, "q16": 128, "q17": 128,
+            "q18": 128, "q19": 128, "q20": 128, "q21": 128, "q22": 128, "q23": 128,
+            "q24": 128, "q25": 128, "q26": 128, "q27": 128, "q28": 128, "q29": 128,
+            "q30": 128, "q31": 128,
+            "pc": 64, "xzr":64,"c": 1, "n": 1, "v": 1, "z": 1}[regname]
+    elif CFA.arch == "armv7":
+        return {
+            "r0": 32, "r1": 32, "r2": 32, "r3": 32, "r4": 32, "r5": 32,
+            "r6": 32, "r7": 32, "r8": 32, "r9": 32, "r10": 32, "r11": 32,
+            "r12": 32, "sp": 32, "lr": 32, "pc": 32, "itstate": 8,
+            "c": 1, "n": 1, "v": 1, "z": 1, "t": 1}[regname]
+    elif CFA.arch == "x86":
+        return {
+            "eax": 32, "ebx": 32, "ecx": 32, "edx": 32,
+            "esi": 32, "edi": 32, "esp": 32, "ebp": 32,
+            "ax": 16, "bx": 16, "cx": 16, "dx": 16, "si": 16, "di": 16,
+            "sp": 16, "bp": 16, "cs": 16, "ds": 16, "es": 16, "ss": 16,
+            "fs": 16, "gs": 16,
+            "iopl": 2,
+            "cf": 1, "pf": 1, "af": 1, "zf": 1, "sf": 1, "tf": 1, "if": 1,
+            "df": 1, "of": 1, "nt": 1, "rf": 1, "vm": 1, "ac": 1, "vif": 1,
+            "vip": 1, "id": 1}[regname]
+    else:
+        raise KeyError("Unkown arch %s" % CFA.arch)
+
 
 #: maps short region names to pretty names
 PRETTY_REGIONS = {'g': 'global', 's': 'stack', 'h': 'heap',
@@ -65,6 +90,7 @@ class CFA(object):
     """
     #: Cache to speed up value parsing. (str, length) -> [Value, ...]
     _valcache = {}
+    arch = None
 
     def __init__(self, states, edges, nodes):
         #: Value (address) -> [node_id]. Nodes marked "final" come first.
@@ -98,6 +124,7 @@ class CFA(object):
                 filename)
             return None
 
+        cls.arch = config.get('loader', 'architecture')
         for section in config.sections():
             if section == 'edges':
                 for edgename, edge in config.items(section):
@@ -114,7 +141,8 @@ class CFA(object):
                     states[address].append(state.node_id)
                 nodes[state.node_id] = state
                 continue
-            raise PyBinCATException("Cannot parse section name (%r)" % section)
+            elif section == 'loader':
+                continue
 
         CFA._valcache = dict()
         cfa = cls(states, edges, nodes)
@@ -157,7 +185,7 @@ class CFA(object):
             mlbincat.process(initfname, outfname, logfname)
         except ImportError:
             # XXX log warning
-            subprocess.call(["bincat_native", initfname, outfname, logfname])
+            subprocess.call(["bincat", initfname, outfname, logfname])
         return cls.parse(outfname, logs=logfname)
 
     def _toValue(self, eip, region="g"):
@@ -214,7 +242,7 @@ class State(object):
     example valtaints: G0x1234 G0x12!0xF0 S0x12!ALL
     """
     __slots__ = ['address', 'node_id', '_regaddrs', '_regtypes', 'final',
-                 'statements', 'bytes', 'tainted', '_outputkv']
+                 'statements', 'bytes', 'tainted', 'taintsrc', '_outputkv']
 
     def __init__(self, node_id, address=None, lazy_init=None):
         self.address = address
@@ -269,7 +297,21 @@ class State(object):
         new_state.final = outputkv.pop("final", None) == "true"
         new_state.statements = outputkv.pop("statements", "")
         new_state.bytes = outputkv.pop("bytes", "")
-        new_state.tainted = outputkv.pop("tainted", "False") == "true"
+        taintedstr = outputkv.pop("tainted", "")
+        if taintedstr == "true":
+            # v0.6 format
+            tainted = True
+            taintsrc = ["t-0"]
+        elif taintedstr == "" or taintedstr == "?":
+            # v0.7 format, not tainted
+            tainted = False
+            taintsrc = []
+        else:
+            # v0.7 format, tainted
+            taintsrc = taintedstr.split(', ')
+            tainted = True
+        new_state.tainted = tainted
+        new_state.taintsrc = taintsrc
         new_state._outputkv = outputkv
         new_state._regaddrs = None
         new_state._regtypes = None
@@ -427,7 +469,7 @@ class State(object):
                 continue
             break
         return "".join(m)
-    
+
     def __setitem__(self, item, val):
         if type(val[0]) is list:
             val = val[0]

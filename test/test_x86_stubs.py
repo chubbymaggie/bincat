@@ -4,10 +4,10 @@ from util import X86
 
 
 x86 = X86(
-    os.path.join(os.path.dirname(os.path.realpath(__file__)),'x86_stub.ini.in')
+    os.path.join(os.path.dirname(os.path.realpath(__file__)),'x86.ini.in')
 )
 
-xfail = pytest.mark.xfail
+xfail = pytest.mark.skip
 
 @pytest.mark.parametrize("val",[0, 1, 0x1f2, 0x1fa4, 0x45f672, 0x8245fa3d, 0xffffffff])
 @pytest.mark.parametrize("fmt",[xfail("i"),
@@ -33,7 +33,7 @@ def test_printf_num(tmpdir, val, fmt, mod, zeropad, sz):
 
     expected = fmtstr % val
     
-    assert expected == bc.get_stdout(), (repr(fmtstr)+"\n"+bc.listing)
+    assert expected == bc.get_stdout().strip(), (repr(fmtstr)+"\n"+bc.listing)
     assert len(expected) == bc.result.last_reg("eax").value, (repr(fmtstr)+"\n"+bc.listing)
 
 
@@ -114,7 +114,7 @@ def test_sprintf_string(tmpdir, val, numl, numr):
 
 
 @pytest.mark.parametrize("src",["", "TEST", "X"*41])
-def test_memcpy(tmpdir, src):
+def test_memcpy_call(tmpdir, src):
     asm = """
            push {length}
            push 0x20000
@@ -130,3 +130,20 @@ def test_memcpy(tmpdir, src):
     assert src == bc.result.last_state.get_string("g",0x10000), (repr(src)[:20]+"\n"+bc.listing)
     assert 0x10000 == bc.result.last_reg("eax").value, (repr(src)[:20]+"\n"+bc.listing)
     
+@pytest.mark.parametrize("src",["", "TEST", "X"*41])
+def test_memcpy_push_ret(tmpdir, src):
+    asm = """
+           push {length}
+           push 0x20000
+           push 0x10000
+           push 0x80000002
+           ret
+    """.format(length=len(src))
+
+    bc = x86.make_bc_test(tmpdir, asm)
+    bc.initfile.set_mem(0x20000, src+"\0")
+    bc.initfile.set_mem(0x10000, "\0"*100)
+    bc.run()
+
+    assert src == bc.result.last_state.get_string("g",0x10000), (repr(src)[:20]+"\n"+bc.listing)
+    assert 0x10000 == bc.result.last_reg("eax").value, (repr(src)[:20]+"\n"+bc.listing)

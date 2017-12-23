@@ -4,6 +4,7 @@
 * [Installation](#installation)
 * [Main commands and features](#main-commands-and-features)
 * [IDA Views](#ida-views)
+* [.ini file format](#ini-file-format)
 
 ## Installation
 See [README](../README.md#installation).
@@ -16,16 +17,13 @@ See [README](../README.md#installation).
 
 ### Start an analysis
 In the **IDA View-A** view, go to the instruction you want the analysis to
-start from. Then, you can either:
-* Use the **Edit >> BinCAT >> Analyze from here** menu
-* Use the context menu (right click in **IDA View-A**), then select the
+start from. Then, you should:
+1. Use configuration pane to set the inital state and start adress
+2. Start the analysis from:
+  * the "Start" button
+  * the context menu (right click in **IDA View-A**), then select the
   **BinCAT >> Analyze from here** menu
-* Use the **Ctrl + Shift + a** shortcut
-
-![BinCAT Start analysis dialog](img/bincat-start-analysis.png)
-
-* Click **Start** to run the analysis with a new configuration (automatically
-  generated)
+  * the **Ctrl + Shift + a** shortcut
 
 ### Override taint
 *Taint* can be overridden for any register value or memory byte, at any
@@ -40,16 +38,16 @@ instruction of the program. Overrides will apply at the *next* instruction.
 
 * from the **IDA View-A** view: click on a register name or memory address,
   then use the **Ctrl + Shift + o** shortcut
-* from the **BinCAT Tainting** view which shows the registers: right click on
+* from the **BinCAT Registers** view which shows the registers: right click on
   a register, then choose the **Add taint override** menu
 
-![Add override from BinCAT Tainting view using context menu](img/add-taint-override-tainting-view.png)
+![Add override from BinCAT Registers view using context menu](img/add-taint-override-registers-view.png)
 
-* from the **BinCAT Hex** view which shows the contents of the memory: select
+* from the **BinCAT Memory** view which shows the contents of the memory: select
   a memory range, then right click, then choose the **Override taint for
   selection** menu, and input a mask that must be applied to each selected byte
 
-![Add override from BinCAT Hex view using context menu](img/add-taint-override-hex-view.png)
+![Add override from BinCAT Memory view using context menu](img/add-taint-override-memory-view.png)
 
 The following values can be used for register overrides:
 * **TAINT_ALL** indicates that all register bytes are tainted
@@ -73,7 +71,7 @@ instructions:
 
 ![BinCAT View-A view](img/ida-view-A.png)
 
-### BinCAT Tainting
+### BinCAT Registers
 This view displays taint and value for each register (general, flags, segment
 registers), at a given point in the analysis.
 
@@ -96,18 +94,18 @@ Register contents are represented:
 * Type is displayed as a tooltip, shown when the mouse hovers a register, if
   type data is available
 
-![BinCAT Tainting view](img/bincat-tainting.png)
+![BinCAT Registers view](img/bincat-registers.png)
 
-### BinCAT Hex view
+### BinCAT Memory view
 
 This view displays the memory contents. BinCAT's representation splits memory
 into 3 regions: heap, stack, and global, which can be chosen using a drop-down
 menu on this view. Then, a second drop-down menu allow selecting the displayed
 address range.
 
-Memory contents are displayed as a grid, using the same conventions are for the **BinCAT Tainting** view described above, regarding value, taint and type.
+Memory contents are displayed as a grid, using the same conventions are for the **BinCAT Registers** view described above, regarding value, taint and type.
 
-![BinCAT Hex view](img/bincat-hex.png)
+![BinCAT Memory view](img/bincat-memory.png)
 
 ### BinCAT Overrides
 
@@ -120,28 +118,29 @@ re-run the analysis, with updated overrides.
 
 ![BinCAT Overrides view](img/bincat-overrides.png)
 
-### BinCAT Debugging
+### BinCAT IL
 
 This view displays the list of BinCAT intermediate language instruction that
-represents the currently selected instruction, as well as the associated bytes. 
+represents the currently selected instruction, as well as the associated
+instruction bytes. 
 
 BinCAT only outputs intermediate language debugging data if loglevel > 2 in the
 analysis parameters. This data is useful for BinCAT developers and debuggers.
 
-![BinCAT Debugging view](img/bincat-debugging.png)
+![BinCAT IL view](img/bincat-il.png)
 
-### BinCAT Configurations
+### BinCAT Configuration pane
 
-This view displays the list of BinCAT analysis configurations that were saved by the user. Users may:
-* Display or edit configurations: select a configuration, then click the
-  **Edit** button
-* Export configurations; select a configuration, then click the **Export** button
-* Delete configurations: select a configuration, right click, then choose the
-  **Remove** menu
+This pane is the starting point for BinCAT analysis. It contains:
+* the initial state for registers
+* the initial state for memory
+* the entrypoint ("Start addr") for analysis
+* the cut-off points for analysis ("Stop addr")
+* the various configurations stored in the IDB, along with loading and export capabilities
 
-![BinCAT Configuration view](img/bincat-configurations.png)
+![BinCAT configuration pane](img/bincat-conf-pane.png)
 
-### Ida Output Window
+### IDA Output Window
 
 This view displays log messages that stem from the BinCAT plugin, or the BinCAT
 analyzer.
@@ -149,3 +148,6 @@ analyzer.
 It also features a python shell, which can be used to debug the BinCAT plugin:
 a global variable (`bc_state`) allows accessing its internal objects.
 
+## .ini file format
+
+See the [dedicated page](ini_format.md).

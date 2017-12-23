@@ -40,13 +40,14 @@ except ImportError:
     # log message will be displayed later
     pass
 
-import idc
 import idaapi
+from idaapi import NW_OPENIDB, NW_CLOSEIDB, NW_TERMIDA, NW_REMOVE
 import idabincat.netnode
 import idabincat.npkgen
 from idabincat.plugin_options import PluginOptions
-from idabincat.analyzer_conf import AnalyzerConfig, AnalyzerConfigurations
+from idabincat.analyzer_conf import AnalyzerConfig, AnalyzerConfigurations, ConfigHelpers
 from idabincat.gui import GUI
+import pybincat
 
 from PyQt5 import QtCore
 # used in idaapi
@@ -55,7 +56,7 @@ from PyQt5 import QtWidgets
 # Logging
 logging.basicConfig(level=logging.DEBUG)
 bc_log = logging.getLogger('bincat.plugin')
-bc_log.setLevel(logging.DEBUG)
+bc_log.setLevel(logging.INFO)
 
 
 def dedup_loglines(loglines, max=None):
@@ -112,9 +113,11 @@ class BincatPlugin(idaapi.plugin_t):
 
     # IDA API methods: init, run, term
     def init(self):
-        procname = idaapi.get_inf_structure().get_proc_name()
-        if procname[0] != 'metapc':
-            bc_log.info("Not on x86, not loading BinCAT")
+        info = idaapi.get_inf_structure()
+        # IDA 6/7 compat
+        procname = info.procname if hasattr(info, 'procname') else info.get_proc_name()[0]
+        if procname != 'metapc' and procname != 'ARM':
+            bc_log.info("Not on a supported CPU, not loading BinCAT")
             return idaapi.PLUGIN_SKIP
         try:
             from pybincat import cfa as cfa_module
@@ -129,20 +132,21 @@ class BincatPlugin(idaapi.plugin_t):
         if no_spawn:
             bc_exe = None
         else:
-            # Check if bincat_native is available
-            bc_exe = distutils.spawn.find_executable('bincat_native')
-        if bc_exe is None and os.name == 'nt':
+            # Check if bincat is available
+            bc_exe = distutils.spawn.find_executable('bincat')
+        if bc_exe is None:
             # add to PATH
             userdir = idaapi.get_user_idadir()
             bin_path = os.path.join(userdir, "plugins", "idabincat", "bin")
             if os.path.isdir(bin_path):
-                os.environ['PATH'] += ";"+bin_path
+                path_env_sep = ';' if os.name == 'nt' else ':'
+                os.environ['PATH'] += path_env_sep+bin_path
             if no_spawn:
-                bc_exe = os.path.join(bin_path, "bincat_native.exe")
+                bc_exe = os.path.join(bin_path, "bincat")
             else:
-                bc_exe = distutils.spawn.find_executable('bincat_native')
+                bc_exe = distutils.spawn.find_executable('bincat')
         if bc_exe is None and no_spawn is False:
-            bc_log.warning('Could not find bincat_native binary, will not be able to run analysis')
+            bc_log.warning('Could not find bincat binary, will not be able to run analysis')
 
         if PluginOptions.get("autostart") != "True":
             # will initialize later
@@ -166,8 +170,11 @@ class BincatPlugin(idaapi.plugin_t):
 
     def term(self):
         if self.state:
+            bc_log.debug("Terminating BinCAT")
             self.state.clear_background()
             self.state.gui.term()
+            self.state.gui = None
+            self.state = None
 
 
 class Analyzer(object):
@@ -234,12 +241,12 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
             return
 
     def run(self):
-        cmdline = "bincat_native %s %s %s" % (self.initfname, self.outfname,
-                                              self.logfname)
+        cmdline = [ "bincat",
+                    [self.initfname,  self.outfname, self.logfname ]]
         # start the process
-        bc_log.debug("Analyzer cmdline: [%s]", cmdline)
+        bc_log.debug("Analyzer cmdline: [%s %s]", cmdline[0], " ".join(cmdline[1]))
         try:
-            self.start(cmdline)
+            self.start(*cmdline)
         except Exception as e:
             bc_log.error("BinCAT failed to launch the analyzer.py")
             bc_log.warning("Exception: %s\n%s", str(e), traceback.format_exc())
@@ -266,7 +273,8 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
     def procanalyzer_on_finish(self):
         bc_log.info("Analyzer process finished")
         exitcode = self.exitCode()
-        bc_log.error("analyzer returned exit code=%i", exitcode)
+        if exitcode != 0:
+            bc_log.error("analyzer returned exit code=%i", exitcode)
         self.process_output()
 
     def process_output(self):
@@ -277,18 +285,18 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
         bc_log.info(str(self.readAllStandardOutput()))
         bc_log.info("---- stderr ----------------")
         bc_log.info(str(self.readAllStandardError()))
-        bc_log.debug("---- logfile ---------------")
+        bc_log.info("---- logfile ---------------")
         if os.path.exists(self.logfname):
             with open(self.logfname, 'rb') as f:
                 log_lines = f.readlines()
             log_lines = dedup_loglines(log_lines, max=100)
             if len(log_lines) > 100:
-                bc_log.debug("---- Only the last 100 log lines (deduped) are displayed here ---")
-                bc_log.debug("---- See full log in %s ---" % self.logfname)
+                bc_log.info("---- Only the last 100 log lines (deduped) are displayed here ---")
+                bc_log.info("---- See full log in %s ---" % self.logfname)
             for line in log_lines:
-                bc_log.debug(line.rstrip())
+                bc_log.info(line.rstrip())
 
-        bc_log.debug("====== end of logfile ======")
+        bc_log.info("====== end of logfile ======")
         self.finish_cb(self.outfname, self.logfname, self.cfaoutfname)
 
 
@@ -366,7 +374,7 @@ class WebAnalyzer(Analyzer):
                 continue
             try:
                 f_sha256 = self.sha256_digest(f)
-                h_shalist.append(f_sha256)
+                h_shalist.append('"%s"' % f_sha256)
             except IOError as e:
                 bc_log.error("Could not open file %s" % f, exc_info=1)
                 return
@@ -378,10 +386,10 @@ class WebAnalyzer(Analyzer):
         # patch in_marshalled_cfa_file - replace with file contents sha256
         if os.path.exists(self.cfainfname):
             cfa_sha256 = self.sha256_digest(self.cfainfname)
-            temp_config.in_marshalled_cfa_file = cfa_sha256
+            temp_config.in_marshalled_cfa_file = '"%s"' % cfa_sha256
         else:
-            temp_config.in_marshalled_cfa_file = "no-input-file"
-        temp_config.out_marshalled_cfa_file = "cfaout.marshal"
+            temp_config.in_marshalled_cfa_file = '"no-input-file"'
+        temp_config.out_marshalled_cfa_file = '"cfaout.marshal"'
         # write patched config file
         init_ini_str = str(temp_config)
         # --- Run analysis
@@ -407,17 +415,17 @@ class WebAnalyzer(Analyzer):
             logfp.write(analyzer_log_contents)
         bc_log.info("---- stdout+stderr ----------------")
         bc_log.info(self.download_file(files["stdout.txt"]))
-        bc_log.debug("---- logfile ---------------")
+        bc_log.info("---- logfile ---------------")
         log_lines = analyzer_log_contents.split('\n')
 
         log_lines = dedup_loglines(log_lines, max=100)
         if len(log_lines) > 100:
-            bc_log.debug("---- Only the last 100 log lines (deduped) are displayed here ---")
-            bc_log.debug("---- See full log in %s ---" % self.logfname)
+            bc_log.info("---- Only the last 100 log lines (deduped) are displayed here ---")
+            bc_log.info("---- See full log in %s ---" % self.logfname)
         for line in log_lines:
-            bc_log.debug(line.rstrip())
+            bc_log.info(line.rstrip())
 
-        bc_log.debug("----------------------------")
+        bc_log.info("----------------------------")
         if "cfaout.marshal" in files:
             # might be absent (ex. when analysis failed, or not requested)
             with open(self.cfaoutfname, 'wb') as cfaoutfp:
@@ -550,13 +558,17 @@ class State(object):
 
     def analysis_finish_cb(self, outfname, logfname, cfaoutfname, ea=None):
         bc_log.debug("Parsing analyzer result file")
-        cfa = cfa_module.CFA.parse(outfname, logs=logfname)
+        try:
+            cfa = cfa_module.CFA.parse(outfname, logs=logfname)
+        except (pybincat.PyBinCATException):
+            bc_log.error("Could not parse result file")
+            return None
         self.clear_background()
         self.cfa = cfa
         if cfa:
             # XXX add user preference for saving to idb? in that case, store
             # reference to marshalled cfa elsewhere
-            bc_log.info("Storing analysis results to idb")
+            bc_log.info("Storing analysis results to idb...")
             with open(outfname, 'rb') as f:
                 self.netnode["out.ini"] = f.read()
             with open(logfname, 'rb') as f:
@@ -567,6 +579,7 @@ class State(object):
             if cfaoutfname is not None and os.path.isfile(cfaoutfname):
                 with open(cfaoutfname, 'rb') as f:
                     self.last_cfaout_marshal = f.read()
+            bc_log.info("Analysis results have been stored idb.")
         else:
             bc_log.info("Empty or unparseable result file.")
         bc_log.debug("----------------------------")
@@ -639,14 +652,7 @@ class State(object):
         filepath = self.current_config.binary_filepath
         if os.path.isfile(filepath):
             return filepath
-        # try to use idaapi.get_input_file_path
-        filepath = idaapi.get_input_file_path()
-        if os.path.isfile(filepath):
-            return filepath
-        # get_input_file_path returns file path from IDB, which may not
-        # exist locally if IDB has been moved (eg. send idb+binary to
-        # another analyst)
-        filepath = idc.GetIdbPath().replace('idb', 'exe')
+        filepath = ConfigHelpers.guess_filepath()
         if os.path.isfile(filepath):
             return filepath
         # give up
@@ -679,7 +685,7 @@ class State(object):
             bc_log.error("Analyzer is unavailable", exc_info=True)
             return
 
-        bc_log.debug("Current analyzer path: %s", path)
+        bc_log.info("Current analyzer path: %s", path)
 
         # Update overrides
         self.current_config.update_overrides(self.overrides)
@@ -725,15 +731,15 @@ class State(object):
                         continue
                     f = new_npk_fname
             # Relative paths are copied
-            elif f.endswith('.no'):
+            elif f.endswith('.no') and os.path.isfile(f):
                 if f[0] != os.path.sep:
                     temp_npk_fname = os.path.join(path, os.path.basename(f))
                     shutil.copyfile(f, temp_npk_fname)
                     f = temp_npk_fname
             else:
                 bc_log.warning(
-                    "Header file %s does not match expected extensions "
-                    "(.c, .no), ignoring.", f)
+                    "Header file %s does not exist or does not match expected "
+                    "extensions (.c, .no), ignoring.", f)
                 continue
 
             new_headers_filenames.append(f)
@@ -811,6 +817,10 @@ class CallbackWrappedList(collections.MutableSequence):
     @_callback_wrap
     def __delitem__(self, item):
         del self._data[item]
+
+    @_callback_wrap
+    def clear(self):
+        self._data = []
 
     def __len__(self):
         return len(self._data)
