@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -81,6 +81,7 @@ rule token = parse
   | "state"             { STATE }
   (* program section *)
   | "program"                { PROGRAM }
+  | "load_elf_coredump" { LOAD_ELF_COREDUMP }
   (* analyzer section *)
   | "analyzer"          { ANALYZER }
   (* sections section *)
@@ -111,6 +112,7 @@ rule token = parse
   | "ini_version"           { INI_VERSION }
   | "unroll"            { UNROLL }
   | "function_unroll"       { FUN_UNROLL }
+  | "external_symbol_max_size" { EXT_SYM_MAX_SIZE }
   | "cut"                   { CUT }
   | "loglevel"              { LOGLEVEL }
   | "store_marshalled_cfa"  { STORE_MCFA }
@@ -133,6 +135,7 @@ rule token = parse
   | "format"            { FORMAT }
   | "pe"            { PE }
   | "elf"           { ELF }
+  | "elfobj"        { ELFOBJ }
   | "manual"                { MANUAL }
   | "raw"                   { RAW }
   | "mode"                  { MODE }
@@ -154,6 +157,8 @@ rule token = parse
   (* misc left operands *)
   | "headers"       { HEADER }
   | "override"      { OVERRIDE }
+  | "nop"      { NOP }
+  | "fun_skip"      { FUN_SKIP }    
   | "TAINT_ALL"         { TAINT_ALL }
   | "TAINT_NONE"        { TAINT_NONE }
   | value as v      { STRING v }

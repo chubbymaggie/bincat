@@ -86,6 +86,7 @@ class NpkGen(object):
         res = re.sub(r"__attribute__.*? ", " ", res)
 
         res = res.replace("$", "D_")
+        res = res.replace("::", "__")
 
         return res
 
@@ -112,7 +113,11 @@ class NpkGen(object):
         except OSError as e:
             error_msg = ("Error encountered while running gcc. "
                          "Is it installed in PATH?")
-            npk_log.error(error_msg, exc_info=True)
+            # Display traceback only if not "no such file"
+            if e.errno != 2:
+                npk_log.error(error_msg, exc_info=True)
+            else:
+                npk_log.error(error_msg, exc_info=False)
             raise NpkGenException(error_msg)
         except Exception as e:
             error_msg = "Error encountered while running gcc."

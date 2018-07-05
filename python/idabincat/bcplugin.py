@@ -28,6 +28,8 @@ import sys
 import tempfile
 import traceback
 import zlib
+from ConfigParser import NoSectionError
+
 # Ugly but IDA Python Linux doesn't have it !
 try:
     import distutils.spawn
@@ -46,7 +48,7 @@ import idabincat.netnode
 import idabincat.npkgen
 from idabincat.plugin_options import PluginOptions
 from idabincat.analyzer_conf import AnalyzerConfig, AnalyzerConfigurations, ConfigHelpers
-from idabincat.gui import GUI
+from idabincat.gui import GUI, taint_color
 import pybincat
 
 from PyQt5 import QtCore
@@ -129,24 +131,24 @@ class BincatPlugin(idaapi.plugin_t):
             return idaapi.PLUGIN_SKIP
         PluginOptions.init()
 
+        # add plugin's 'bin' dir to PATH
+        userdir = idaapi.get_user_idadir()
+        bin_path = os.path.join(userdir, "plugins", "idabincat", "bin")
+        if os.path.isdir(bin_path):
+            path_env_sep = ';' if os.name == 'nt' else ':'
+            os.environ['PATH'] += path_env_sep+bin_path
         if no_spawn:
             bc_exe = None
         else:
             # Check if bincat is available
             bc_exe = distutils.spawn.find_executable('bincat')
         if bc_exe is None:
-            # add to PATH
-            userdir = idaapi.get_user_idadir()
-            bin_path = os.path.join(userdir, "plugins", "idabincat", "bin")
-            if os.path.isdir(bin_path):
-                path_env_sep = ';' if os.name == 'nt' else ':'
-                os.environ['PATH'] += path_env_sep+bin_path
             if no_spawn:
                 bc_exe = os.path.join(bin_path, "bincat")
             else:
                 bc_exe = distutils.spawn.find_executable('bincat')
         if bc_exe is None and no_spawn is False:
-            bc_log.warning('Could not find bincat binary, will not be able to run analysis')
+            bc_log.warning('Could not find bincat binary, will not be able to run local analysis')
 
         if PluginOptions.get("autostart") != "True":
             # will initialize later
@@ -213,6 +215,29 @@ class Analyzer(object):
     def logfname(self):
         return os.path.join(self.path, "analyzer.log")
 
+class LocalAnalyzerTimer(object):
+    """
+    IDA timer used to kill the BinCAT analyzer if the user
+    cancels the analysis
+    """
+    def __init__(self, qprocess):
+        self.interval = 500 # ms
+        self.qprocess = qprocess
+        self.timer = idaapi.register_timer(self.interval, self)
+        if self.timer is None:
+            raise RuntimeError, "Failed to register timer"
+
+    def __call__(self):
+        if idaapi.user_cancelled():
+            bc_log.info("Analysis cancelled by user, terminating process")
+            self.qprocess.terminate()
+            return -1
+        else:
+            return self.interval
+
+    def destroy(self):
+        idaapi.unregister_timer(self.timer)
+
 
 class LocalAnalyzer(Analyzer, QtCore.QProcess):
     """
@@ -237,10 +262,17 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
             npk_fname = idabincat.npkgen.NpkGen().generate_tnpk(
                 imports_data=imports_data, destfname=destfname)
             return npk_fname
-        except idabincat.npkgen.NpkGenException as e:
+        except idabincat.npkgen.NpkGenException:
+            bc_log.warning("Could not compile header file, "
+                           "types from IDB will not be used for type propagation")
             return
 
     def run(self):
+        idaapi.show_wait_box("Running analysis")
+
+        # Create a timer to allow for cancellation
+        self.timer = LocalAnalyzerTimer(self)
+
         cmdline = [ "bincat",
                     [self.initfname,  self.outfname, self.logfname ]]
         # start the process
@@ -275,12 +307,17 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
         exitcode = self.exitCode()
         if exitcode != 0:
             bc_log.error("analyzer returned exit code=%i", exitcode)
-        self.process_output()
+        try:
+            self.process_output()
+        except Exception as e:
+            idaapi.hide_wait_box()
+            bc_log.error("Caught exception, hiding wait box", exc_info=True)
 
     def process_output(self):
         """
         Try to process analyzer output.
         """
+        self.timer.destroy()
         bc_log.info("---- stdout ----------------")
         bc_log.info(str(self.readAllStandardOutput()))
         bc_log.info("---- stderr ----------------")
@@ -297,6 +334,7 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
                 bc_log.info(line.rstrip())
 
         bc_log.info("====== end of logfile ======")
+        idaapi.hide_wait_box()
         self.finish_cb(self.outfname, self.logfname, self.cfaoutfname)
 
 
@@ -314,9 +352,9 @@ class WebAnalyzer(Analyzer):
         try:
             version_req = requests.get(self.server_url + "/version")
             srv_api_version = str(version_req.text)
-        except:
+        except requests.ConnectionError as e:
             raise AnalyzerUnavailable(
-                "BinCAT server at %s could not be reached" % self.server_url)
+                "BinCAT server at %s could not be reached : %s" % (self.server_url, str(e)))
         if srv_api_version != WebAnalyzer.API_VERSION:
             raise AnalyzerUnavailable(
                 "API mismatch: this plugin supports version %s, while server "
@@ -337,8 +375,9 @@ class WebAnalyzer(Analyzer):
             return
         npk_res = requests.post(self.server_url + "/convert_to_tnpk/" + sha256)
         if npk_res.status_code != 200:
-            bc_log.error("Error while compiling file to tnpk "
-                         "on BinCAT analysis server.")
+            bc_log.warning("Error while compiling file to tnpk "
+                           "on BinCAT analysis server, types from IDB will not be "
+                           "used for type propagation")
             return
         res = npk_res.json()
         if 'status' not in res or res['status'] != 'ok':
@@ -519,6 +558,9 @@ class State(object):
         """
         if (PluginOptions.get("web_analyzer") == "True" and
                 PluginOptions.get("server_url") != ""):
+            if 'requests' not in sys.modules:
+                bc_log.error("Trying to launch a remote analysis without the 'requests' module !")
+                raise AnalyzerUnavailable()
             return WebAnalyzer(*args, **kwargs)
         else:
             return LocalAnalyzer(*args, **kwargs)
@@ -557,10 +599,14 @@ class State(object):
                 idaapi.set_item_color(ea, color)
 
     def analysis_finish_cb(self, outfname, logfname, cfaoutfname, ea=None):
+        idaapi.show_wait_box("HIDECANCEL\nParsing BinCAT analysis results")
         bc_log.debug("Parsing analyzer result file")
+        # Here we can't check for user_cancelled because the UI is
+        # unresponsive when parsing.
         try:
             cfa = cfa_module.CFA.parse(outfname, logs=logfname)
-        except (pybincat.PyBinCATException):
+        except (pybincat.PyBinCATException, NoSectionError):
+            idaapi.hide_wait_box()
             bc_log.error("Could not parse result file")
             return None
         self.clear_background()
@@ -583,6 +629,7 @@ class State(object):
         else:
             bc_log.info("Empty or unparseable result file.")
         bc_log.debug("----------------------------")
+        idaapi.replace_wait_box("Updating IDB with BinCAT results")
         # Update current RVA to start address (nodeid = 0)
         # by default, use current ea - e.g, in case there is no results (cfa is
         # None) or no node 0 (happens in backward mode)
@@ -597,25 +644,43 @@ class State(object):
             except (KeyError, TypeError):
                 # no cfa is None, or no node0
                 pass
-        self.set_current_ea(current_ea, force=True)
+        try:
+            self.set_current_ea(current_ea, force=True)
+        except TypeError as e:
+            bc_log.warn("Could not load results from IDB")
+            bc_log.warn("------ BEGIN EXCEPTION -----")
+            bc_log.exception(e)
+            bc_log.warn("------ END EXCEPTION -----")
+            idaapi.hide_wait_box()
+            return None
         self.netnode["current_ea"] = current_ea
         if not cfa:
             return
         for addr, nodeids in cfa.states.items():
+            if hasattr(idaapi, "user_cancelled") and idaapi.user_cancelled() > 0:
+                bc_log.info("User cancelled!")
+                idaapi.hide_wait_box()
+                return None
             ea = addr.value
             tainted = False
+            taint_id = 1
             for n_id in nodeids:
                 # is it tainted?
                 # find children state
                 state = cfa[n_id]
                 if state.tainted:
                     tainted = True
+                    if state.taintsrc:
+                        # Take the first one
+                        taint_id = int(state.taintsrc[0].split("-")[1])
                     break
 
             if tainted:
-                idaapi.set_item_color(ea, 0xDDFFDD)
+                idaapi.set_item_color(ea, taint_color(taint_id))
             else:
-                idaapi.set_item_color(ea, 0xCDCFCE)
+                idaapi.set_item_color(ea, 0xF0F0F0)
+        idaapi.hide_wait_box()
+        self.gui.focus_registers()
 
     def set_current_node(self, node_id):
         if self.cfa:
@@ -652,7 +717,7 @@ class State(object):
         filepath = self.current_config.binary_filepath
         if os.path.isfile(filepath):
             return filepath
-        filepath = ConfigHelpers.guess_filepath()
+        filepath = ConfigHelpers.guess_file_path()
         if os.path.isfile(filepath):
             return filepath
         # give up
@@ -681,7 +746,7 @@ class State(object):
         # *Analyzer instance, killing an unlucky QProcess in the process
         try:
             self.analyzer = self.new_analyzer(path, self.analysis_finish_cb)
-        except AnalyzerUnavailable as e:
+        except AnalyzerUnavailable:
             bc_log.error("Analyzer is unavailable", exc_info=True)
             return
 
@@ -756,7 +821,7 @@ class State(object):
                     "ida-generated header could be invalid.")
             else:
                 headers_filenames.append(npk_filename)
-            bc_log.debug("Final npk files: %r" % headers_filenames)
+            bc_log.debug("Final npk files: %r", headers_filenames)
         self.current_config.headers_files = ','.join(headers_filenames)
 
         self.current_config.write(self.analyzer.initfname)

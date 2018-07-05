@@ -22,6 +22,7 @@ import os
 import logging
 import string
 import re
+from colorsys import hsv_to_rgb
 import idaapi
 import idautils
 from PyQt5 import QtCore, QtWidgets, QtGui
@@ -36,6 +37,54 @@ from idabincat.analyzer_conf import AnalyzerConfig, ConfigHelpers
 bc_log = logging.getLogger('bincat.gui')
 bc_log.setLevel(logging.DEBUG)
 
+GREENS = [
+    (169,241,100),
+    (207,207,154),
+    (192,195,188),
+    (158,199,191),
+    (195,238,153),
+    (179,179,135),
+    (118,155,148),
+    (195,207,184),
+    (241,242,184),
+    (209,230,189),
+    (152,153,120),
+    ( 77, 98, 94),
+    (254,255,202),
+    ( 99,133,126),
+    ( 86,115,109),
+]
+
+BLUES_AND_YELLOWS = [
+    (173,109,  0),
+    (  2, 28, 66),
+    (173,170,  0),
+    ( 41,  2, 67),
+    (140, 88,  0),
+    (  4, 68,162),
+    (246,241,  0),
+    ( 57,  2, 94),
+    (207,130,  0),
+    (  4, 49,114),
+    (100, 98,  0),
+    (246,155,  0),
+    ( 71,  3,116),
+    (100, 63,  0),
+    (207,203,  0),
+    ( 99,  3,165),
+    (140,137,  0),
+    (  5, 58,136),
+    ( 84,  3,139),
+    (  4, 39, 92),
+]
+
+
+COLS = GREENS # BLUES_AND_YELLOWS
+
+
+def taint_color(n):
+    r, g, b = COLS[n%len(COLS)]
+    return b | g<<8 | r << 16
 
 class EditConfigurationFileForm_t(QtWidgets.QDialog):
     def __init__(self, parent, state):
@@ -291,7 +340,7 @@ class BinCATMemForm_t(idaapi.PluginForm):
         self.mem_ranges = None
         self.current_region = None
         self.current_range_idx = None
-        #: region name (1 letter) -> address
+        #: region name (0-1 letter) -> address
         self.last_visited = dict((k, None) for k in cfa.PRETTY_REGIONS.keys())
         self.pretty_to_int_map = \
             dict((v, k) for k, v in cfa.PRETTY_REGIONS.items())
@@ -354,8 +403,6 @@ class BinCATMemForm_t(idaapi.PluginForm):
     def update_region(self, pretty_region):
         region = self.pretty_to_int_map[pretty_region]
         self.current_region = region
-        if region == "":
-            return
         self.range_select.blockSignals(True)
         self.range_select.clear()
         for r in self.mem_ranges[region]:
@@ -419,7 +466,7 @@ class BinCATMemForm_t(idaapi.PluginForm):
                 # happens in backward mode: states having no defined memory
                 return
             former_region = self.region_select.currentText()
-            newregion = ""
+            newregion = None
             newregidx = -1
             self.region_select.blockSignals(True)
             self.region_select.clear()
@@ -429,7 +476,7 @@ class BinCATMemForm_t(idaapi.PluginForm):
                 if pretty_reg == former_region:
                     newregion = pretty_reg
                     newregidx = ridx
-                if newregion == "":
+                if newregion is None:
                     newregion = pretty_reg
                     newregidx = 0
             self.region_select.setCurrentIndex(newregidx)
@@ -531,6 +578,11 @@ class BinCATConfigForm_t(idaapi.PluginForm):
             self._mem_table_menu)
 
         tables_split.addWidget(self.mem_table)
+
+        # Coredump path, hidden by default
+        self.lbl_core_path = QtWidgets.QLabel()
+        self.lbl_core_path.hide()
+        tables_split.addWidget(self.lbl_core_path)
 
         # For backward we just show a help text
         self.lbl_back_help = QtWidgets.QLabel("Backward mode uses overrides, initial "
@@ -712,10 +764,10 @@ class BinCATConfigForm_t(idaapi.PluginForm):
         return
 
     def _copy_start(self):
-        self.ip_start_addr.setText("0x%x" % idaapi.get_screen_ea())
+        self.ip_start_addr.setText("0x%X" % idaapi.get_screen_ea())
 
     def _copy_stop(self):
-        self.ip_stop_addr.setText("0x%x" % idaapi.get_screen_ea())
+        self.ip_stop_addr.setText("0x%X" % idaapi.get_screen_ea())
 
     def get_analysis_method(self):
         if self.radio_forward.isChecked():
@@ -836,6 +888,16 @@ class BinCATConfigForm_t(idaapi.PluginForm):
         self.cfgregmodel.beginResetModel()
         self.cfgmemmodel.beginResetModel()
         config = self.s.edit_config
+        # If we have a coredump, disable mem/regs
+        if config.coredump:
+            self.regs_table.setEnabled(False)
+            self.mem_table.setEnabled(False)
+            self.lbl_core_path.setText("Coredump path: "+config.coredump)
+            self.lbl_core_path.show()
+        else:
+            self.regs_table.setEnabled(True)
+            self.mem_table.setEnabled(True)
+            self.lbl_core_path.hide()
         self.ip_start_addr.setText(config.analysis_ep)
         cut = config.stop_address or ""
         self.ip_stop_addr.setText(cut)
@@ -1015,8 +1077,13 @@ class BinCATRegistersForm_t(idaapi.PluginForm):
 
         splitter = QtWidgets.QSplitter(self.parent)
         layout.addWidget(splitter, 0, 0)
+
+        # RVA address label
+        self.alabel = QtWidgets.QLabel('RVA: %s' % self.rvatxt)
+        splitter.addWidget(self.alabel)
+
         # Node id label
-        self.nilabel = QtWidgets.QLabel('Nodes at this address:')
+        self.nilabel = QtWidgets.QLabel('Node:')
         splitter.addWidget(self.nilabel)
 
         # Node combobox
@@ -1024,19 +1091,21 @@ class BinCATRegistersForm_t(idaapi.PluginForm):
         self.node_select.currentTextChanged.connect(self.update_node)
         splitter.addWidget(self.node_select)
 
-        # RVA address label
-        self.alabel = QtWidgets.QLabel('RVA: %s' % self.rvatxt)
-        splitter.addWidget(self.alabel)
+        # Node id label
+        self.nnlabel = QtWidgets.QLabel('Next node(s):')
+        splitter.addWidget(self.nnlabel)
 
         # Goto combo box
         self.nextnodes_combo = QtWidgets.QComboBox()
         self.nextnodes_combo.currentTextChanged.connect(self.goto_next)
         splitter.addWidget(self.nextnodes_combo)
+
         # leave space for comboboxes in splitter, rather than between widgets
         splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
-        splitter.setStretchFactor(3, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setStretchFactor(2, 1)
+        splitter.setStretchFactor(3, 0)
+        splitter.setStretchFactor(4, 1)
 
         # Value Taint Table
         self.vttable = QtWidgets.QTableView(self.parent)
@@ -1100,7 +1169,7 @@ class BinCATRegistersForm_t(idaapi.PluginForm):
         """
         :param ea: int or long
         """
-        self.rvatxt = '0x%08x' % ea
+        self.rvatxt = '0x%08X' % ea
         if not (self.shown and self.created):
             return
         self.alabel.setText('RVA: %s' % self.rvatxt)
@@ -1128,8 +1197,7 @@ class BinCATRegistersForm_t(idaapi.PluginForm):
                 self.nextnodes_combo.setEnabled(False)
             else:
                 for nid in next_nodes:
-                    self.nextnodes_combo.addItem(
-                        "goto next node (%d)" % len(next_nodes))
+                    self.nextnodes_combo.addItem("")
                     self.nextnodes_combo.addItem(str(nid))
                 self.nextnodes_combo.setEnabled(True)
             self.nextnodes_combo.blockSignals(False)
@@ -1391,7 +1459,7 @@ class ValueTaintModel(QtCore.QAbstractTableModel):
                 return (6, row)
             else:
                 # used for arm*
-                if (value.startswith(("r", "x")) and 47 < ord(value[1]) < 58):
+                if value.startswith(("r", "x")) and 47 < ord(value[1]) < 58:
                     if len(value) == 2:
                         # r0, r1, ..., r9
                         return (3, row)
@@ -1739,7 +1807,7 @@ class HandleAddOverride(idaapi.action_handler_t):
             highlighted = idaapi.get_highlight(ctx.widget)
         if highlighted is None:
             return 0
-        elif type(highlighted) is tuple:
+        elif isinstance(highlighted, tuple):
             highlighted = highlighted[0]
         address = self.s.current_ea
         # guess whether highlighted text is register or address
@@ -1927,7 +1995,14 @@ class GUI(object):
         self.hooks = Hooks(state, self)
         self.hooks.hook()
 
+    def focus_registers(self):
+        if getattr(idaapi, "activate_widget"):
+            widget = idaapi.find_widget("BinCAT Registers")
+            if widget:
+                idaapi.activate_widget(widget, True)
+
     def show_windows(self):
+        # XXX hide debug form by default (issue #27)
         self.BinCATDebugForm.Show()
         self.BinCATRegistersForm.Show()
         self.BinCATOverridesForm.Show()
