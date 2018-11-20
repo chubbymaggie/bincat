@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -670,11 +670,19 @@ type reloc_type_t =
   | R_386_NONE | R_386_32 | R_386_PC32 | R_386_GOT32 | R_386_PLT32 | R_386_COPY | R_386_GLOB_DAT
   | R_386_JUMP_SLOT | R_386_RELATIVE | R_386_GOTOFF | R_386_GOTPC | R_386_TLS_TPOFF
   (* ARM relocation types *)
-  | R_ARM_NONE | R_ARM_GLOB_DAT | R_ARM_JUMP_SLOT
+  | R_ARM_NONE | R_ARM_COPY | R_ARM_GLOB_DAT | R_ARM_JUMP_SLOT
   (* AARCH64 relocation types *)
   | R_AARCH64_COPY | R_AARCH64_GLOB_DAT | R_AARCH64_JUMP_SLOT | R_AARCH64_RELATIVE
   | R_AARCH64_TLS_DTPREL64 | R_AARCH64_TLS_DTPMOD64 | R_AARCH64_TLS_TPREL64
   | R_AARCH64_TLSDESC | R_AARCH64_IRELATIVE
+  (* POWERPC relocation types *)
+  | R_PPC_NONE | R_PPC_ADDR32 | R_PPC_ADDR24 | R_PPC_ADDR16 | R_PPC_ADDR16_LO | R_PPC_ADDR16_HI
+  | R_PPC_ADDR16_HA | R_PPC_ADDR14 | R_PPC_ADDR14_BRTAKEN | R_PPC_ADDR14_BRNTAKEN | R_PPC_REL24
+  | R_PPC_REL14 | R_PPC_REL14_BRTAKEN | R_PPC_REL14_BRNTAKEN | R_PPC_GOT16 | R_PPC_GOT16_LO
+  | R_PPC_GOT16_HI | R_PPC_GOT16_HA | R_PPC_PLTREL24 | R_PPC_COPY | R_PPC_GLOB_DAT
+  | R_PPC_JMP_SLOT | R_PPC_RELATIVE | R_PPC_LOCAL24PC | R_PPC_UADDR32 | R_PPC_UADDR16 | R_PPC_REL32
+  | R_PPC_PLT32 | R_PPC_PLTREL32 | R_PPC_PLT16_LO | R_PPL_PLT16_HI | R_PPC_PLT16_HA | R_PPC_SDAREL16
+  | R_PPC_SECTOFF | R_PPC_SECTOFF_LO | R_PPC_SECTOFF_HI | R_PPC_SECTOFF_HA | R_PPC_ADDR30
 
 let to_reloc_type r hdr =
     match hdr.e_machine with
@@ -690,6 +698,7 @@ let to_reloc_type r hdr =
        begin
          match r with
          | 0 -> R_ARM_NONE
+         | 20 -> R_ARM_COPY
          | 21 -> R_ARM_GLOB_DAT
          | 22 -> R_ARM_JUMP_SLOT
          | _ -> RELOC_OTHER (hdr.e_machine, r)
@@ -708,6 +717,24 @@ let to_reloc_type r hdr =
          | 1032 -> R_AARCH64_IRELATIVE
          | _ -> RELOC_OTHER (hdr.e_machine, r)
        end
+    | POWERPC ->
+       begin
+         match r with
+         | 0  -> R_PPC_NONE            | 1  -> R_PPC_ADDR32         | 2  -> R_PPC_ADDR24
+         | 3  -> R_PPC_ADDR16          | 4  -> R_PPC_ADDR16_LO      | 5  -> R_PPC_ADDR16_HI
+         | 6  -> R_PPC_ADDR16_HA       | 7  -> R_PPC_ADDR14         | 8  -> R_PPC_ADDR14_BRTAKEN
+         | 9  -> R_PPC_ADDR14_BRNTAKEN | 10 -> R_PPC_REL24          | 11 -> R_PPC_REL14
+         | 12 -> R_PPC_REL14_BRTAKEN   | 13 -> R_PPC_REL14_BRNTAKEN | 14 -> R_PPC_GOT16
+         | 15 -> R_PPC_GOT16_LO        | 16 -> R_PPC_GOT16_HI       | 17 -> R_PPC_GOT16_HA
+         | 18 -> R_PPC_PLTREL24        | 19 -> R_PPC_COPY           | 20 -> R_PPC_GLOB_DAT
+         | 21 -> R_PPC_JMP_SLOT        | 22 -> R_PPC_RELATIVE       | 23 -> R_PPC_LOCAL24PC
+         | 24 -> R_PPC_UADDR32         | 25 -> R_PPC_UADDR16        | 26 -> R_PPC_REL32
+         | 27 -> R_PPC_PLT32           | 28 -> R_PPC_PLTREL32       | 29 -> R_PPC_PLT16_LO
+         | 30 -> R_PPL_PLT16_HI        | 31 -> R_PPC_PLT16_HA       | 32 -> R_PPC_SDAREL16
+         | 33 -> R_PPC_SECTOFF         | 34 -> R_PPC_SECTOFF_LO     | 35 -> R_PPC_SECTOFF_HI
+         | 36 -> R_PPC_SECTOFF_HA      | 37 -> R_PPC_ADDR30
+         | _ -> RELOC_OTHER (hdr.e_machine, r)
+       end
     | _ -> RELOC_OTHER (hdr.e_machine, r)
 
 let reloc_type_to_string rel =
@@ -717,12 +744,31 @@ let reloc_type_to_string rel =
   | R_386_GLOB_DAT -> "R_386_GLOB_DAT"  | R_386_JUMP_SLOT -> "R_386_JUMP_SLOT"  | R_386_RELATIVE -> "R_386_RELATIVE"
   | R_386_GOTOFF -> "R_386_GOTOFF"      | R_386_GOTPC -> "R_386_GOTPC"          | R_386_TLS_TPOFF -> "R_386_TLS_TPOFF"
   | R_ARM_NONE -> "R_ARM_NONE"
-  | R_ARM_GLOB_DAT -> "R_ARM_GLOB_DAT"  | R_ARM_JUMP_SLOT -> "R_ARM_JUMP_SLOT"
+  | R_ARM_COPY -> "R_ARM_COPY" | R_ARM_GLOB_DAT -> "R_ARM_GLOB_DAT"  | R_ARM_JUMP_SLOT -> "R_ARM_JUMP_SLOT"
   | R_AARCH64_COPY -> "R_AARCH64_COPY"                 | R_AARCH64_GLOB_DAT -> "R_AARCH64_GLOB_DAT"
   | R_AARCH64_JUMP_SLOT -> "R_AARCH64_JUMP_SLOT"       | R_AARCH64_RELATIVE -> "R_AARCH64_RELATIVE"
   | R_AARCH64_TLS_DTPREL64 -> "R_AARCH64_TLS_DTPREL64" | R_AARCH64_TLS_DTPMOD64 -> "R_AARCH64_TLS_DTPMOD64"
   | R_AARCH64_TLS_TPREL64 -> "R_AARCH64_TLS_TPREL64"   | R_AARCH64_TLSDESC -> "R_AARCH64_TLSDESC"
   | R_AARCH64_IRELATIVE -> "R_AARCH64_IRELATIVE"
+  | R_PPC_NONE -> "R_PPC_NONE"                     | R_PPC_ADDR32 -> "R_PPC_ADDR32"
+  | R_PPC_ADDR24 -> "R_PPC_ADDR24"                 | R_PPC_ADDR16 -> "R_PPC_ADDR16"
+  | R_PPC_ADDR16_LO -> "R_PPC_ADDR16_LO"           | R_PPC_ADDR16_HI -> "R_PPC_ADDR16_HI"
+  | R_PPC_ADDR16_HA -> "R_PPC_ADDR16_HA"           | R_PPC_ADDR14 -> "R_PPC_ADDR14"
+  | R_PPC_ADDR14_BRTAKEN -> "R_PPC_ADDR14_BRTAKEN" | R_PPC_ADDR14_BRNTAKEN -> "R_PPC_ADDR14_BRNTAKEN"
+  | R_PPC_REL24 -> "R_PPC_REL24"                   | R_PPC_REL14 -> "R_PPC_REL14"
+  | R_PPC_REL14_BRTAKEN -> "R_PPC_REL14_BRTAKEN"   | R_PPC_REL14_BRNTAKEN -> "R_PPC_REL14_BRNTAKEN"
+  | R_PPC_GOT16 -> "R_PPC_GOT16"                   | R_PPC_GOT16_LO -> "R_PPC_GOT16_LO"
+  | R_PPC_GOT16_HI -> "R_PPC_GOT16_HI"             | R_PPC_GOT16_HA -> "R_PPC_GOT16_HA"
+  | R_PPC_PLTREL24 -> "R_PPC_PLTREL24"             | R_PPC_COPY -> "R_PPC_COPY"
+  | R_PPC_GLOB_DAT -> "R_PPC_GLOB_DAT"             | R_PPC_JMP_SLOT -> "R_PPC_JMP_SLOT"
+  | R_PPC_RELATIVE -> "R_PPC_RELATIVE"             | R_PPC_LOCAL24PC -> "R_PPC_LOCAL24PC"
+  | R_PPC_UADDR32 -> "R_PPC_UADDR32"               | R_PPC_UADDR16 -> "R_PPC_UADDR16"
+  | R_PPC_REL32 -> "R_PPC_REL32"                   | R_PPC_PLT32 -> "R_PPC_PLT32"
+  | R_PPC_PLTREL32 -> "R_PPC_PLTREL32"             | R_PPC_PLT16_LO -> "R_PPC_PLT16_LO"
+  | R_PPL_PLT16_HI -> "R_PPL_PLT16_HI"             | R_PPC_PLT16_HA -> "R_PPC_PLT16_HA"
+  | R_PPC_SDAREL16 -> "R_PPC_SDAREL16"             | R_PPC_SECTOFF -> "R_PPC_SECTOFF"
+  | R_PPC_SECTOFF_LO -> "R_PPC_SECTOFF_LO"         | R_PPC_SECTOFF_HI -> "R_PPC_SECTOFF_HI"
+  | R_PPC_SECTOFF_HA -> "R_PPC_SECTOFF_HA"         | R_PPC_ADDR30 -> "R_PPC_ADDR30"
   | RELOC_OTHER (mach,num) -> (Printf.sprintf "reloc(%s,%#x)" (e_machine_to_string mach) num)
 
 
@@ -891,18 +937,18 @@ let find_note note_list note_type note_name =
 let elf_to_coredump_regs elf =
   let make_reg_LE s name ofs sz =
     let value = Z.of_bits (String.sub s ofs sz) in
-    (name, (Some (Config.Content value),[])) in
+    (name, (Some (Config.Content (Config.G, value)),[])) in
   let _make_reg_BE s name ofs sz =
     let buf = Buffer.create 16 in
     for i = ofs+sz-1 downto ofs do
         Buffer.add_char buf s.[i]
     done;
     let value = Z.of_bits (Buffer.contents buf) in
-    (name, (Some (Config.Content value), [])) in
+    (name, (Some (Config.Content (Config.G, value)), [])) in
   let make_flags s ofs sz flag_list =
     let fval = Z.of_bits (String.sub s ofs sz) in
     List.map (fun (fname, fofs, fmask) ->
-        (fname, (Some (Config.Content (Z.logand (Z.shift_right fval fofs)
+        (fname, (Some (Config.Content (Config.G, Z.logand (Z.shift_right fval fofs)
                                                 (Z.of_int fmask))), []))) flag_list in
   match elf.hdr.e_ident.e_osabi, elf.hdr.e_machine with
   | ELFOSABI_SYSVV, X86 ->
@@ -933,7 +979,7 @@ let elf_to_coredump_regs elf =
      registers := (make_reg_LE prstatus.n_desc "pc" 0x84 4) :: !registers;
      let cspr = Z.of_bits (String.sub prstatus.n_desc 0x88 4) in
      let itstate = Z.(((cspr asr 25) land ~$3) lor ((cspr asr 8) land ~$0xfc)) in
-     registers := ("itstate", (Some (Config.Content itstate), [])) :: !registers;
+     registers := ("itstate", (Some (Config.Content (Config.G, itstate)), [])) :: !registers;
      let flags = make_flags prstatus.n_desc 0x88 4
                             [ ("n", 31, 1) ; ("z", 30, 1) ;
                               ("c", 29, 1) ; ("v", 28, 1) ;

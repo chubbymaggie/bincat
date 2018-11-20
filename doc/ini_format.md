@@ -2,12 +2,18 @@
 
 ## Foreword
 
-BinCAT basically takes `.ini` files as input. The ini format varies quite often
+BinCAT takes `.ini` files as input. The ini format varies quite often
 as we introduce new features, so it has a format version, defined in the
 `[analyzer]` section, in the `ini_version` key.
 
 This documentation is *partial*, the only reference is the parser code in
 `parser.mly`.
+
+Example files are provided:
+* for x86, see [get_key_x86.ini](examples/get_key_x86.ini)
+* for armv7, see [get_key_armv7.ini](examples/get_key_armv7.ini)
+* for armv8, see [get_key_armv8.ini](examples/get_key_armv8.ini)
+* for powerpc, see [get_key_powerpc.ini](examples/get_key_powerpc.ini)
 
 ## Sections
 
@@ -46,7 +52,7 @@ they will behave as if they are empty.
     registers.
 
 For example: `fun_skip=kill(2)` will skip calls to `kill`, which has 2
-arguments. To specifiy also its return value to be 0, then add `fun_skip =
+arguments. To specify also its return value to be 0, then add `fun_skip =
 kill(2, 0)`.
 
 ### nop
@@ -72,7 +78,7 @@ format = elf
 load_elf_coredump = "core_get_key_x86"
 ```
 
-BinCAT will load the inital state from the specified core file.
+BinCAT will load the initial state from the specified core file.
 
 ## State syntax
 
@@ -100,6 +106,12 @@ One can also skip some parts:
 
 taint can be also specified by using the magic value `TAINT_ALL`.
 
+Important remark: our memory model consider global memory and
+heap as completely separated spaces (without overlap). By default a
+value is considered to be into the global memory space. If one wants
+to set a value in the heap space it has to be prefixed with a
+'H'.
+
 ### Registers
 
 Registers are defined by adding entries to the `[state]` section with the
@@ -115,7 +127,7 @@ Memory state is also defined in the `[state]` section:
 
 where:
 
-* `REGION` can be either `mem`, `stack` or `heap`.
+* `REGION` can be either `mem` or `heap`.
 * `ADDRESS` is a number
 * `*size` is optional and allows to quickly define big slices. read it as a `memset`
 * `VALUE` can either be as defined above OR use the advanced syntax defined below.

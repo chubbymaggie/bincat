@@ -18,7 +18,7 @@ See [README](../README.md#installation).
 ### Start an analysis
 In the **IDA View-A** view, go to the instruction you want the analysis to
 start from. Then, you should:
-1. Use configuration pane to set the inital state and start adress
+1. Use configuration pane to set the initial state and start address
 2. Start the analysis from:
   * the "Start" button
   * the context menu (right click in **IDA View-A**), then select the
@@ -64,21 +64,28 @@ Defined taint overrides are then displayed in the **BinCAT Overrides** view.
 ### IDA View-A view
 On this view, the BinCAT plugin sets the background color for analyzed
 instructions:
-* Instructions that have been analyzed AND have at least one tainted operand
-  have a green background
 * Instructions that have been analyzed, but do not manipulate tainted data have
   a gray background
+* Instructions that have been analyzed AND have at least one tainted operand
+  have a non-gray background
+
+For instructions that are not analyzed, the background color is not changed by
+the BinCAT plugin.
 
 ![BinCAT View-A view](img/ida-view-A.png)
 
 ### BinCAT Registers
-This view displays taint and value for each register (general, flags, segment
-registers), at a given point in the analysis.
+This view displays taint, value and type for each register (general, flags,
+segment registers), at a given point in the analysis.
 
 The current RVA is displayed. The instruction that is present at this address
 may have been analyzed several times, especially if it is part of a loop. In
 that case, the analyzer will have created one "node" for each analysis. This
 view allows choosing the node that is currently being viewed.
+
+Additionally, at a given node, several paths may have been examined by the
+analyzer, for instance separately considering the case where a malloc
+allocation fails, and the case where it succeeds.
 
 Register contents are represented:
 * Values are represented as text, using both an hexadecimal and an ascii
@@ -99,7 +106,7 @@ Register contents are represented:
 ### BinCAT Memory view
 
 This view displays the memory contents. BinCAT's representation splits memory
-into 3 regions: heap, stack, and global, which can be chosen using a drop-down
+into 2 regions: mem and heap, which can be chosen using a drop-down
 menu on this view. Then, a second drop-down menu allow selecting the displayed
 address range.
 

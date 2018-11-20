@@ -118,8 +118,8 @@ class BincatPlugin(idaapi.plugin_t):
         info = idaapi.get_inf_structure()
         # IDA 6/7 compat
         procname = info.procname if hasattr(info, 'procname') else info.get_proc_name()[0]
-        if procname != 'metapc' and procname != 'ARM':
-            bc_log.info("Not on a supported CPU, not loading BinCAT")
+        if procname != 'metapc' and procname != 'ARM' and procname != 'PPC':
+            bc_log.info("CPU '%s' is not supported, not loading BinCAT", procname)
             return idaapi.PLUGIN_SKIP
         try:
             from pybincat import cfa as cfa_module
@@ -221,7 +221,7 @@ class LocalAnalyzerTimer(object):
     cancels the analysis
     """
     def __init__(self, qprocess):
-        self.interval = 500 # ms
+        self.interval = 500  # ms
         self.qprocess = qprocess
         self.timer = idaapi.register_timer(self.interval, self)
         if self.timer is None:
@@ -273,10 +273,11 @@ class LocalAnalyzer(Analyzer, QtCore.QProcess):
         # Create a timer to allow for cancellation
         self.timer = LocalAnalyzerTimer(self)
 
-        cmdline = [ "bincat",
-                    [self.initfname,  self.outfname, self.logfname ]]
+        cmdline = ["bincat",
+                   [self.initfname, self.outfname, self.logfname]]
         # start the process
-        bc_log.debug("Analyzer cmdline: [%s %s]", cmdline[0], " ".join(cmdline[1]))
+        bc_log.debug(
+            "Analyzer cmdline: [%s %s]", cmdline[0], " ".join(cmdline[1]))
         try:
             self.start(*cmdline)
         except Exception as e:
@@ -376,8 +377,8 @@ class WebAnalyzer(Analyzer):
         npk_res = requests.post(self.server_url + "/convert_to_tnpk/" + sha256)
         if npk_res.status_code != 200:
             bc_log.warning("Error while compiling file to tnpk "
-                           "on BinCAT analysis server, types from IDB will not be "
-                           "used for type propagation")
+                           "on BinCAT analysis server, types from IDB will "
+                           "not be used for type propagation")
             return
         res = npk_res.json()
         if 'status' not in res or res['status'] != 'ok':
@@ -524,8 +525,11 @@ class State(object):
     def __init__(self):
         self.current_ea = None
         self.cfa = None
-        self.current_state = None
+        self.current_node = None
+        #: list of node ids (int)
         self.current_node_ids = []
+        #: cfa.Unrel object or None
+        self.current_unrel = None
         #: last run config
         self.current_config = None
         #: config to be edited
@@ -594,7 +598,7 @@ class State(object):
         """
         if self.cfa:
             color = idaapi.calc_bg_color(idaapi.NIF_BG_COLOR)
-            for v in self.cfa.states:
+            for v in self.cfa.addr_nodes:
                 ea = v.value
                 idaapi.set_item_color(ea, color)
 
@@ -656,7 +660,7 @@ class State(object):
         self.netnode["current_ea"] = current_ea
         if not cfa:
             return
-        for addr, nodeids in cfa.states.items():
+        for addr, nodeids in cfa.addr_nodes.items():
             if hasattr(idaapi, "user_cancelled") and idaapi.user_cancelled() > 0:
                 bc_log.info("User cancelled!")
                 idaapi.hide_wait_box()
@@ -666,13 +670,13 @@ class State(object):
             taint_id = 1
             for n_id in nodeids:
                 # is it tainted?
-                # find children state
-                state = cfa[n_id]
-                if state.tainted:
+                # find child nodes
+                node = cfa[n_id]
+                if node.tainted:
                     tainted = True
-                    if state.taintsrc:
+                    if node.taintsrc:
                         # Take the first one
-                        taint_id = int(state.taintsrc[0].split("-")[1])
+                        taint_id = int(node.taintsrc[0].split("-")[1])
                     break
 
             if tainted:
@@ -682,14 +686,15 @@ class State(object):
         idaapi.hide_wait_box()
         self.gui.focus_registers()
 
-    def set_current_node(self, node_id):
+    def set_current_node(self, node_id, unrel_id=None):
         if self.cfa:
-            state = self.cfa[node_id]
-            if state:
-                self.set_current_ea(state.address.value,
-                                    force=True, node_id=node_id)
+            node = self.cfa[node_id]
+            if node:
+                self.set_current_ea(
+                    node.address.value,
+                    force=True, node_id=node_id, unrel_id=unrel_id)
 
-    def set_current_ea(self, ea, force=False, node_id=None):
+    def set_current_ea(self, ea, force=False, node_id=None, unrel_id=None):
         """
         :param ea: int or long
         """
@@ -697,19 +702,25 @@ class State(object):
             return
         self.gui.before_change_ea()
         self.current_ea = ea
-        nonempty_state = False
+        empty_node = True
         if self.cfa:
             node_ids = self.cfa.node_id_from_addr(ea)
             if node_ids:
-                nonempty_state = True
                 if node_id in node_ids:
-                    self.current_state = self.cfa[node_id]
+                    self.current_node = self.cfa[node_id]
                 else:
-                    self.current_state = self.cfa[node_ids[0]]
+                    self.current_node = self.cfa[node_ids[0]]
                 self.current_node_ids = node_ids
-        if not nonempty_state:
-            self.current_state = None
+                # find unrel_id
+                if not unrel_id:
+                    unrel_id = self.current_node.default_unrel_id()
+                if unrel_id and unrel_id in self.current_node.unrels:
+                    self.current_unrel = self.current_node.unrels[unrel_id]
+                    empty_node = False
+        if empty_node:
+            self.current_node = None
             self.current_node_ids = []
+            self.current_unrel = None
 
         self.gui.after_change_ea()
 
@@ -723,14 +734,12 @@ class State(object):
         # give up
         return None
 
-    def start_analysis(self, config_str=None):
+    def start_analysis(self):
         """
         Creates new temporary dir. File structure:
         input files: init.ini, cfain.marshal
         output files: out.ini, cfaout.marshal
         """
-        if config_str:
-            self.current_config = AnalyzerConfig.load_from_str(config_str)
         binary_filepath = self.guess_filepath()
         if not binary_filepath:
             bc_log.error(
@@ -831,7 +840,7 @@ class State(object):
         """
         Re-run analysis, taking new overrides settings into account
         """
-        if self.start_analysis is None:
+        if self.current_config is None:
             # XXX upload all required files in Web Analyzer
             # XXX Store all required files in IDB
             bc_log.error(

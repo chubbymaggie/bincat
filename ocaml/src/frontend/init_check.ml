@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -40,8 +40,8 @@ let check_register_init r (c, t) =
   let name = Register.name r in
   begin
     match c with
-    | Some Content c    -> check_content (Z.numbits c) sz name
-    | Some CMask (b, m) -> check_mask (Z.numbits b) m sz name
+    | Some Content c    -> check_content (Z.numbits (snd c)) sz name
+    | Some CMask (b, m) -> check_mask (Z.numbits (snd b)) m sz name
     | Some _ -> L.abort (fun p -> p "Illegal memory init \"|xx|\" spec used for register")
     | None -> ()
   end;
@@ -52,7 +52,7 @@ let check_register_init r (c, t) =
     | _ -> ()) t
 
 
-let check_mem (c, taints): unit =
+let check_mem (c, taints) (mem_sz: Z.t option): unit =
   let taint_sz = ref 0 in
   let compute_sz () =
     let compute t =
@@ -62,19 +62,45 @@ let check_mem (c, taints): unit =
          let n = Z.numbits t' in
          if !taint_sz = 0 then
            taint_sz := n
-         else if !taint_sz <> n then L.abort (fun p -> p "Illegal taint source list (different sizes)") 
+         else
+           if !taint_sz <> n then L.abort (fun p -> p "Illegal taint source list (different sizes)")
+           
       | TBytes (s, _) | TBytes_Mask (s, _, _) ->
          let n = (String.length s)*4 in
          if !taint_sz = 0 then
            taint_sz := n
-         else if !taint_sz <> n then L.abort (fun p -> p "Illegal taint source list (different sizes)")
+         else
+           if !taint_sz <> n then L.abort (fun p -> p "Illegal taint source list (different sizes)")
     in
     List.iter compute taints
   in
   compute_sz();
+  let check_mem_sz memc =
+    match mem_sz with
+    | None -> ()
+    | Some mem_sz' ->
+       if Z.compare mem_sz' (Z.of_int memc) < 0 then
+         L.abort (fun p -> p "content size exceeds size of the destination")
+  in
   match c with
   | None -> if !taint_sz > 8 then L.abort (fun p -> p "Illegal taint override, byte only without value override") ;
-  | Some (Content ct) -> check_content (Z.numbits ct) !taint_sz ""
-  | Some (CMask (ct, m)) -> check_mask (Z.numbits ct) m !taint_sz ""
-  | Some (Bytes s) -> check_content ((String.length s)*4) !taint_sz ""
-  | Some (Bytes_Mask (s, n)) ->  check_mask ((String.length s)*4) n !taint_sz ""
+  | Some (Content ct) ->
+     let sz = Z.numbits (snd ct) in
+     check_mem_sz sz;
+     check_content sz !taint_sz ""
+     
+  | Some (CMask (ct, m)) ->
+     let sz = Z.numbits (snd ct) in
+     check_mem_sz sz;
+     check_mask sz m !taint_sz ""
+     
+  | Some (Bytes (_, s)) ->
+     let sz = (String.length s)*4 in
+     check_mem_sz sz;
+     check_content sz !taint_sz ""
+     
+  | Some (Bytes_Mask (s, n)) ->
+     let sz = (String.length (snd s))*4 in
+     check_mem_sz sz;
+     check_mask sz n !taint_sz ""
+

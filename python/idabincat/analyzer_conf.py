@@ -146,7 +146,11 @@ class ConfigHelpers(object):
             idaapi.CM_CC_MANUAL: "manual",
         }[compiler_info.cm & idaapi.CM_CC_MASK]
         # XXX
-        if cc not in ("stdcall", "cdecl", "fastcall"):
+        if ConfigHelpers.get_arch() == "powerpc" and ida_db_info_structure.abiname == "sysv":
+            return "svr"
+        if ConfigHelpers.get_arch().startswith('arm'):
+            return "aapcs"
+        elif cc not in ("stdcall", "cdecl", "fastcall"):
             return "stdcall"
         else:
             return cc
@@ -158,6 +162,12 @@ class ConfigHelpers(object):
             seg = idaapi.getseg(idautils.Segments().next())
         bitness = seg.bitness
         return {0: 16, 1: 32, 2: 64}[bitness]
+
+    @staticmethod
+    def get_endianness():
+        ida_db_info_structure = idaapi.get_inf_structure()
+        return "big" if ida_db_info_structure.is_be() else "little"
+
 
     @staticmethod
     def get_stack_width():
@@ -229,6 +239,9 @@ class ConfigHelpers(object):
         if not name:
             imports[ea] = (module, ordinal)
         else:
+            # Remove @@GLIBC... suffix
+            if "@@" in name:
+                name = name.split('@@')[0]
             imports[ea] = (module, name)
         return True
 
@@ -249,7 +262,7 @@ class ConfigHelpers(object):
             if reg in ['eax', 'ecx', 'edx', 'ebx', 'ebp', 'esi', 'edi', 'esp']:
                 return 32
             if reg in ['cf', 'pf', 'af', 'zf', 'sf', 'tf', 'if', 'of', 'nt',
-                         'rf', 'vm', 'ac', 'vif', 'vip', 'id', 'df']:
+                       'rf', 'vm', 'ac', 'vif', 'vip', 'id', 'df']:
                 return 1
             if reg == 'iopl':
                 return 3
@@ -265,6 +278,13 @@ class ConfigHelpers(object):
                 return 128
             if reg in ['n', 'z', 'c', 'v']:
                 return 1
+        elif arch == 'powerpc':
+            if reg in ['so', 'ov', 'ca']:
+                return 1
+            elif reg == 'tbc':
+                return 7
+            else:
+                return 32
         return None
 
     @staticmethod
@@ -275,7 +295,7 @@ class ConfigHelpers(object):
         if arch == "x86":
             for name in ["eax", "ecx", "edx", "ebx", "ebp", "esi", "edi"]:
                 regs.append([name, "0", "0xFFFFFFFF", ""])
-            regs.append(["esp", "0x2000", "", ""])
+            regs.append(["esp", "0xb8001000", "", ""])
             for name in ["cf", "pf", "af", "zf", "sf", "tf", "if", "of", "nt",
                          "rf", "vm", "ac", "vif", "vip", "id"]:
                 regs.append([name, "0", "1", ""])
@@ -284,7 +304,7 @@ class ConfigHelpers(object):
         elif arch == "armv7":
             for i in range(13):
                 regs.append(["r%d" % i, "0", "0xFFFFFFFF", ""])
-            regs.append(["sp", "0x2000", "", ""])
+            regs.append(["sp", "0xb8001000", "", ""])
             regs.append(["lr", "0x0", "", ""])
             regs.append(["pc", "0x0", "", ""])
             regs.append(["n", "0", "1", ""])
@@ -295,31 +315,44 @@ class ConfigHelpers(object):
         elif arch == "armv8":
             for i in range(31):
                 regs.append(["x%d" % i, "0", "0xFFFFFFFFFFFFFFFF", ""])
-            regs.append(["sp", "0x2000", "", ""])
+            regs.append(["sp", "0xb8001000", "", ""])
             for i in range(32):
-                regs.append(["q%d" % i, "0", "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", ""])
+                regs.append(
+                    ["q%d" % i, "0", "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF", ""])
             regs.append(["n", "0", "1", ""])
             regs.append(["z", "0", "1", ""])
             regs.append(["c", "0", "1", ""])
             regs.append(["v", "0", "1", ""])
             regs.append(["xzr", "0", "", ""])
+        elif arch == "powerpc":
+            for i in range(31):
+                regs.append(["r%d" % i, "0", "0xFFFFFFFF", ""])
+            for reg in ['lr', 'ctr', 'cr']:
+                regs.append([reg, "0", "0xFFFFFFFF", ""])
+            for reg in ['so', 'ov', 'ca']:
+                regs.append([reg, "0", "1", ""])
+            regs.append(["tbc", "0", "0x7F", ""])
         return regs
 
     @staticmethod
     def get_initial_mem(arch=None):
-        return [["stack", "0x1000*8192", "|00|?0xFF"]]
+        return [["mem", "0xb8000000*8192", "|00|?0xFF"]]
 
     @staticmethod
-    def get_arch(entrypoint):
-        procname = idaapi.get_inf_structure().procName.lower()
+    def get_arch():
+        info = idaapi.get_inf_structure()
+        procname = info.procName.lower()
         if procname == "metapc":
             return "x86"
+        if procname == "ppc":
+            return "powerpc"
         elif procname.startswith("arm"):
-            segment_size = ConfigHelpers.get_segment_size(entrypoint)
-            if segment_size == 32:
+            if info.is_32bit():
                 return "armv7"
             else:
                 return "armv8"
+        bc_log.error("Unknown architecture")
+        return None
 
 
 class InitialState(object):
@@ -339,7 +372,7 @@ class InitialState(object):
                 else:
                     self.mem.append(InitialState.mem_init_parse(k, v))
         else:
-            arch = ConfigHelpers.get_arch(entrypoint)
+            arch = ConfigHelpers.get_arch()
             self.regs = ConfigHelpers.get_registers_with_state(arch)
             self.mem = ConfigHelpers.get_initial_mem(arch)
 
@@ -357,7 +390,7 @@ class InitialState(object):
 
     @staticmethod
     def mem_init_parse(mem_addr, mem_val):
-        mem_addr_re = re.compile("(?P<region>[^[]+)\[(?P<address>[^\]]+)\]")
+        mem_addr_re = re.compile(r"(?P<region>[^[]+)\[(?P<address>[^\]]+)\]")
         m = mem_addr_re.match(mem_addr)
         return [m.group('region'), m.group('address'), mem_val]
 
@@ -365,7 +398,9 @@ class InitialState(object):
     def reg_init_parse(reg_spec, reg_val):
         if reg_spec[0:3] != "reg":
             raise ValueError("Invalid reg spec, not starting with 'reg'")
-        reg_re = re.compile("(?P<value>[^!?]+)?(\?(?P<top>[^!]+))?(!(?P<taint>[^#]*))?(?P<cmt>#.*)?")
+        reg_re = re.compile(
+            r"(?P<value>[^!?]+)?(\?(?P<top>[^!]+))?"
+            "(!(?P<taint>[^#]*))?(?P<cmt>#.*)?")
         m = reg_re.match(reg_val)
         return [reg_spec[4:-1],
                 m.group('value') or '',
@@ -595,8 +630,6 @@ class AnalyzerConfig(object):
         parser.readfp(sio)
         return AnalyzerConfig(parser)
 
-    # Output functions: save config to a file, or the IDB (for a given
-    # address, or as default)
     def write(self, filepath):
         # OCaml can only handle "local" encodings for file name
         # So, ugly code following
@@ -654,7 +687,7 @@ class AnalyzerConfig(object):
         config.set('program', 'op_sz', ConfigHelpers.get_stack_width())
         config.set('program', 'stack_width', ConfigHelpers.get_stack_width())
 
-        arch = ConfigHelpers.get_arch(analysis_start_va)
+        arch = ConfigHelpers.get_arch()
         config.set('program', 'architecture', arch)
 
         input_file = ConfigHelpers.guess_file_path()
@@ -681,7 +714,7 @@ class AnalyzerConfig(object):
             config.set('override',
                        '; This will be overriden by values from the BinCAT '
                        'Overrides view')
-            config.set('state', 'stack[0x1000*8192]', '|00|?0xFF')
+            config.set('state', 'mem[0xb8000000*8192]', '|00|?0xFF')
             init_state = InitialState.get_default(analysis_start_va)
             for key, val in init_state:
                 config.set("state", key, val)
@@ -736,6 +769,13 @@ class AnalyzerConfig(object):
                 # remove segment registers
                 for seg_reg in ('cs', 'ds', 'ss', 'es', 'fs', 'gs'):
                     config.remove_option('x86', seg_reg)
+        elif arch == "powerpc":
+            try:
+                config.add_section(arch)
+            except ConfigParser.DuplicateSectionError:
+                # already exists in (arch,OS)-specific config
+                pass
+            config.set('powerpc', 'endianness', ConfigHelpers.get_endianness())
 
         # [libc section]
         # config.add_section('libc')

@@ -35,6 +35,7 @@ ML=\
   disassembly/x86Imports.ml\
   disassembly/armv7Imports.ml\
   disassembly/armv8aImports.ml\
+  disassembly/powerpcImports.ml\
   frontend/lexer.ml\
   frontend/parser.ml\
   domains/env.ml\
@@ -43,12 +44,15 @@ ML=\
   domains/unrel.ml\
   domains/vector.ml\
   domains/pointer.ml\
+  domains/unrels.ml\
   domains/reduced_bit_tainting.ml\
-  domains/reduced_unrel_typenv.ml\
+  domains/heap.ml\
+  domains/reduced_unrel_typenv_heap.ml\
   disassembly/cfa.ml\
   disassembly/x86.ml\
   disassembly/armv7.ml\
   disassembly/armv8A.ml\
+  disassembly/powerpc.ml\
   fixpoint/interpreter.ml\
   bincat_ver.ml \
   main.ml
@@ -79,8 +83,8 @@ DEPS-parser := npk/c2newspeak/typedC.cmi
 OPTS-parser := -I npk/c2newspeak
 DEPS-x86 := npk/c2newspeak/typedC.cmi npk/newspeak/newspeak.cmi
 OPTS-x86 := -I npk/c2newspeak -I npk/newspeak
-DEPS-reduced_unrel_typenv := npk/c2newspeak/typedC.cmi npk/newspeak/newspeak.cmi
-OPTS-reduced_unrel_typenv := -I npk/c2newspeak -I npk/newspeak
+DEPS-reduced_unrel_typenv_heap := npk/c2newspeak/typedC.cmi npk/newspeak/newspeak.cmi
+OPTS-reduced_unrel_typenv_heap := -I npk/c2newspeak -I npk/newspeak
 
 
 EXTLIB := nums str unix graph zarith bigarray

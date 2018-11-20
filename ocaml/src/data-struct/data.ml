@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -15,7 +15,6 @@
     You should have received a copy of the GNU Affero General Public License
     along with BinCAT.  If not, see <http://www.gnu.org/licenses/>.
 *)
-
 
 (** Word data type *)
 module Word =
@@ -38,6 +37,8 @@ module Word =
 
     let zero sz = Z.zero, sz
 
+    let is_zero (z, _) = Z.compare z Z.zero = 0
+                  
     let one sz = Z.one, sz
 
     let add w1 w2 =
@@ -48,7 +49,7 @@ module Word =
       let w' = Z.sub (fst w1) (fst w2) in
       w', max (Z.numbits w') (max (size w1) (size w2))
 
-
+  
     let of_int v sz = v, sz
 
     let to_int v = fst v
@@ -91,7 +92,24 @@ module Word =
     let shift_left (w, sz) i = Z.shift_left w i, sz-i
     let shift_right (w, sz) i = Z.shift_right w i, sz-i
     let neg (w, sz) = Z.neg w, sz
-end
+
+    let rec i_to_bytes (z: Z.t) (nb: int) (max: int): t list =
+      if nb < max then
+        (Z.logand z (Z.of_int 0xFF), 8)::(i_to_bytes (Z.shift_left z 8) (nb+1) max)
+      else
+        []
+          
+    let to_bytes ((w, sz): t): t list =
+      if sz = 8 then
+        [w, sz]
+      else
+        if sz mod 8 <> 0 then
+          raise (Invalid_argument "Word: incompatible size for byte splitting")
+        else
+          let nb = sz / 8 in
+          i_to_bytes w 0 nb
+          
+  end
 
 (** Address Data Type *)
 module Address =
@@ -99,59 +117,80 @@ struct
 
     module A = struct
 
-        (* these memory regions are supposed not to overlap *)
-        type region =
-          | Global (** abstract base address of global variables and code *)
-          | Stack  (** abstract base address of the stack *)
-          | Heap   (** abstract base address of a dynamically allocated memory block *)
+      type heap_id_t = int
+      type pos = int option
+        
+      (* these memory regions are supposed not to overlap *)
+      type region =
+        | Global 
+        | Heap of heap_id_t * Z.t (* first int is the id ; second int is the size in bits *)
+            
 
+      type t = region * Word.t (* valid address *)
+          
+        let heap_id = ref 0
 
+        let heap_tbl = Hashtbl.create 5
+
+            
+        let new_heap_region sz =
+          let id = !heap_id in 
+          let region = Heap (id, sz) in
+          Hashtbl.add heap_tbl id sz;
+          heap_id := !heap_id + 1;
+          region, id
+
+        let get_heap_region id =
+          let sz = Hashtbl.find heap_tbl id in
+          Heap (id, sz), sz
+               
+        let size_of_heap_region id = Hashtbl.find heap_tbl id
+          
         let string_of_region r =
             match r with
             | Global -> ""
-            | Stack  -> "S"
-            | Heap   -> "H"
+            | Heap (id, _)  -> "H"^(string_of_int id) ^ "-"
 
-        type t = region * Word.t
+        let of_null () = Global, Word.of_int !Config.null_cst !Config.address_sz    
+
+        let is_null (r, w) = r = Global && Word.is_zero w
+
+        let region_from_config c =
+          match c with
+          | Config.G -> Global
+          | Config.H -> fst (new_heap_region !Config.default_heap_size) 
+
 
         let compare_region r1 r2 =
-            match r1, r2 with
+          match r1, r2 with
             | Global, Global -> 0
             | Global, _ -> -1
-            | Stack, Stack -> 0
-            | Stack, Global -> 1
-            | Stack, Heap -> -1
-            | Heap, Heap -> 0
-            | Heap, Global -> 1
-            | Heap, Stack -> 1
+            | Heap (id1, _), Heap (id2, _) -> id1 - id2
+            | Heap _, Global -> 1
 
+        let equal_region r1 r2 = compare_region r1 r2 = 0
+                                                                              
         let compare (r1, w1) (r2, w2) =
-            let n = compare_region r1 r2 in
-            if n <> 0 then
-                n
-            else
-                Word.compare_value w1 w2
+             let n = compare_region r1 r2 in
+             if n <> 0 then
+               n
+             else
+               Word.compare_value w1 w2
 
         let equal (r1, w1) (r2, w2) =
-            let b = r1 = r2 in
-            if b then Word.equal w1 w2
-            else
-                false
+            if equal_region r1 r2 then Word.equal w1 w2
+            else false
 
         let of_string r a n =
-            if !Config.mode = Config.Protected then
-                let w = Word.of_string a n in
-                if Word.compare w (Word.zero n) < 0 then
-                    raise (Exceptions.Error "Tried to create negative address")
-                else
-                    r, w
-            else
-                raise (Exceptions.Error "Address generation for this memory mode not yet managed")
+            let w = Word.of_string a n in
+            if Word.compare w (Word.zero n) < 0 then
+              raise (Exceptions.Error "Tried to create negative address")
+            else r, w
 
         let to_string (r, w) = Printf.sprintf "%s%s" (string_of_region r) (Word.to_string w)
 
         (** returns the offset of the address *)
-        let to_int (_r, w) = Word.to_int w
+        let to_int (_, w) =  Word.to_int w
 
         let of_int r i o = r, (i, o)
 
@@ -166,46 +205,44 @@ struct
             let n = Word.size w in
             let w' = Word.add w (Word.of_int o' n) in
             if Word.size w' > n then
-                begin
                     r, Word.truncate w' n
-                end
-            else
-                r, w'
+            else r, w'
 
-        let dec (r, w) = add_offset (r, w) (Z.minus_one)
-        let inc (r, w) = add_offset (r, w) (Z.one)
+        let dec a = add_offset a (Z.minus_one)
+        let inc a = add_offset a (Z.one)
 
-        let to_word (_r, w) sz =
-            if Word.size w >= sz then
-                w
+        let to_word (_, w) sz =
+            if Word.size w >= sz then w
             else
                 raise (Exceptions.Error "overflow when tried to convert an address to a word")
 
-        let sub v1 v2 =
-            match v1, v2 with
-            | (r1, w1), (r2, w2)  when r1 = r2 ->
-              let w = Word.sub w1 w2 in
-              if Word.compare w (Word.zero (Word.size w1)) < 0 then
-                raise (Exceptions.Error (Printf.sprintf "invalid address substraction: %s - %s" (to_string v1) (to_string v2)))
-              else
-                  Word.to_int w
-            | _, _  -> raise (Exceptions.Error (Printf.sprintf "invalid address substraction: %s - %s" (to_string v1) (to_string v2)))
+        let sub a1 a2 =
+          match a1, a2 with
+          |  (r1, w1), (r2, w2) when equal_region r1 r2 ->
+             let w = Word.sub w1 w2 in
+             if Word.compare w (Word.zero (Word.size w1)) < 0 then
+               raise (Exceptions.Error (Printf.sprintf "invalid address substraction: %s - %s" (to_string a1) (to_string a2)))
+             else
+               Word.to_int w
+          | _, _  -> raise (Exceptions.Error (Printf.sprintf "invalid address substraction: %s - %s" (to_string a1) (to_string a2)))
 
-        let binary op ((r1, w1): t) ((r2, w2): t): t =
-            let r' =
-                match r1, r2 with
-                | Global, r | r, Global -> r
-                | r1, r2                ->
-                  if r1 = r2 then r1 else raise (Exceptions.Error "Invalid binary operation on addresses of different regions")
-            in
-            r', Word.binary op w1 w2
+        let binary op (r1, w1) (r2, w2): t =
+               let r' =
+                 match r1, r2 with
+                 | Global, r | r, Global -> r
+                 | r1, r2                ->
+                    if equal_region r1 r2 then r1 else raise (Exceptions.Error "Invalid binary operation on addresses of different regions")
+               in
+               r', Word.binary op w1 w2
 
         let unary op (r, w) = r, Word.unary op w
 
-        let size_extension (r, w) sz = r, Word.size_extension w sz
+        let size_extension (r,  w) sz = r, Word.size_extension w sz
 
         let shift_left (r, w) i = r, Word.shift_left w i
+                        
         let shift_right (r, w) i = r, Word.shift_right w i
+                        
         let neg (r, w) = r, Word.neg w
     end
     include A

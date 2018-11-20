@@ -16,8 +16,11 @@
     along with BinCAT.  If not, see <http://www.gnu.org/licenses/>.
 *)
 
+let ignore_unknown_relocations = ref false;;
+
 let unroll = ref 20;;
 let fun_unroll = ref 50;;
+let kset_bound = ref 10;;
 let loglevel = ref 3;;
 let module_loglevel: (string, int) Hashtbl.t = Hashtbl.create 5;;
 
@@ -48,12 +51,24 @@ type archi_t =
   | X86
   | ARMv7
   | ARMv8 (* ARMv8-A *)
+  | POWERPC
+
+let archi_to_string = function
+  | X86 -> "x86"
+  | ARMv7 -> "armv7"
+  | ARMv8 -> "armv8"
+  | POWERPC -> "powerpc"
 
 let architecture = ref X86;;
 
 type endianness_t =
   | LITTLE
   | BIG
+
+let endianness_to_string e =
+  match e with
+  | LITTLE -> "little endian"
+  | BIG -> "big endian"
 
 let endianness = ref LITTLE;;
 
@@ -89,6 +104,7 @@ type call_conv_t =
   | STDCALL
   | FASTCALL
   | AAPCS (* ARM *)
+  | SVR (* PowerPC *)
 
 let call_conv_to_string cc =
   match cc with
@@ -96,6 +112,7 @@ let call_conv_to_string cc =
   | STDCALL -> "STDCALL"
   | FASTCALL -> "FASTCALL"
   | AAPCS -> "AAPCS"
+  | SVR -> "SVR"
 
 let call_conv = ref CDECL
 
@@ -115,6 +132,16 @@ let es = ref Z.zero
 let fs = ref Z.zero
 let gs = ref Z.zero
 
+(* value of the NULL address *)
+let null_cst = ref Z.zero
+(* predicate to check whether the given Z.t is the NULL value *) 
+let is_null_cst z = Z.compare z !null_cst = 0
+
+let char_of_null_cst () = Char.chr (Z.to_int !null_cst)
+  
+(* used for powerpc mfspr *)
+let processor_version = ref 0
+
 (* if true then an interleave of backward then forward analysis from a CFA will be processed *)
 (** after the first forward analysis from binary has been performed *)
 let interleave = ref false
@@ -127,11 +154,18 @@ type tvalue =
   | TBytes of string * Taint.Src.id_t
   | TBytes_Mask of (string * Z.t * Taint.Src.id_t)
 
+type region =
+  | G (* global *)
+  | H (* heap *)
+
+type content = region * Z.t
+type bytes = region * string
+           
 type cvalue =
-  | Content of Z.t
-  | CMask of Z.t * Z.t
-  | Bytes of string
-  | Bytes_Mask of (string * Z.t)
+  | Content of content
+  | CMask of content * Z.t
+  | Bytes of bytes
+  | Bytes_Mask of bytes * Z.t
 
 (** returns size of content, rounded to the next multiple of Config.operand_sz *)
 let round_sz sz =
@@ -145,8 +179,8 @@ let round_sz sz =
       
 let size_of_content c =
   match c with
-  | Content z | CMask (z, _) -> round_sz (Z.numbits z)
-  | Bytes b | Bytes_Mask (b, _) -> (String.length b)*4
+  | Content z | CMask (z, _) -> round_sz (Z.numbits (snd z))
+  | Bytes (_, b) | Bytes_Mask ((_, b), _) -> (String.length b)*4
                                                
 let size_of_taint (t: tvalue): int =
   match t with
@@ -180,10 +214,9 @@ let funSkipTbl: (fun_t, Z.t * ((cvalue option * tvalue list) option)) Hashtbl.t 
                                 
 let reg_override: (Z.t, ((string * (Register.t -> (cvalue option * tvalue list))) list)) Hashtbl.t = Hashtbl.create 5
 let mem_override: (Z.t, ((Z.t * int) * (cvalue option * tvalue list)) list) Hashtbl.t = Hashtbl.create 5
-let stack_override: (Z.t, ((Z.t * int) * (cvalue option * tvalue list)) list) Hashtbl.t = Hashtbl.create 5
-let heap_override: (Z.t, ((Z.t * int) * (cvalue option * tvalue list)) list) Hashtbl.t = Hashtbl.create 5
+let heap_override: (Z.t, (((Z.t * Z.t) * int) * (cvalue option * tvalue list)) list) Hashtbl.t = Hashtbl.create 5
 
-(* lists for the initialisation of the global memory, stack and heap *)
+(* lists for the initialisation of the global memory and heap *)
 (* first element is the key is the address ; second one is the number of repetition *)
 type mem_init_t = ((Z.t * int) * (cvalue option * tvalue list)) list
 type reg_init_t = (string * (cvalue option * tvalue list)) list
@@ -191,7 +224,6 @@ type reg_init_t = (string * (cvalue option * tvalue list)) list
 let register_content: reg_init_t ref = ref []
 let registers_from_coredump: reg_init_t ref = ref []
 let memory_content: mem_init_t ref = ref []
-let stack_content: mem_init_t ref = ref []
 let heap_content: mem_init_t ref = ref []
 
 let elf_coredumps : string list ref = ref []
@@ -200,6 +232,7 @@ type sec_t = (Z.t * Z.t * Z.t * Z.t * string) list ref
 let sections: sec_t = ref []
 
 let import_tbl: (Z.t, (string * string)) Hashtbl.t = Hashtbl.create 5
+let import_tbl_rev: (string, Z.t) Hashtbl.t = Hashtbl.create 5
 
 (* tainting and typing rules for functions *)
 type taint_t =
@@ -218,17 +251,38 @@ let tainting_rules : ((string * string), (call_conv_t * taint_t option * taint_t
 (** data structure for the typing rules of import functions *)
 let typing_rules : (string, TypedC.ftyp) Hashtbl.t = Hashtbl.create 5
 
+(** default size of the initial heap *)
+(* 1 Go in bits *)
+let default_heap_size = ref (Z.mul (Z.shift_left Z.one 30) (Z.of_int 8))
 
+
+(* argv ooptions *)
+type argv_config_t = {
+    ignore_unknown_relocations : bool option ref ;
+  }
+
+let argv_options : argv_config_t = {
+    ignore_unknown_relocations = ref None ;
+  }
+
+
+let apply_option (opt:'a ref) (optval:'a option ref) =
+  match !optval with
+  | None -> ()
+  | Some x -> opt := x;;
+
+let apply_arg_options () =
+  apply_option ignore_unknown_relocations argv_options.ignore_unknown_relocations
+
+                      
 let clear_tables () =
   Hashtbl.clear assert_untainted_functions;
   Hashtbl.clear assert_tainted_functions;
   Hashtbl.clear import_tbl;
   Hashtbl.clear reg_override;
   Hashtbl.clear mem_override;
-  Hashtbl.clear stack_override;
   Hashtbl.clear heap_override;
   memory_content := [];
-  stack_content := [];
   heap_content := []
 
 let reset () =
@@ -236,6 +290,7 @@ let reset () =
   loglevel := 3;
   unroll := 20;
   fun_unroll := 50;
+  kset_bound := 10;
   loglevel := 3;
   max_instruction_size := 16;
   nopAddresses := SAddresses.empty;
@@ -264,20 +319,31 @@ let reset () =
   gs := Z.zero;
   interleave := false;
   memory_content := [];
-  stack_content := [];
   heap_content := [];
   register_content := [];
   Hashtbl.reset funSkipTbl;
   Hashtbl.reset module_loglevel;
   Hashtbl.reset reg_override;
   Hashtbl.reset mem_override;
-  Hashtbl.reset stack_override;
   Hashtbl.reset heap_override;
   Hashtbl.reset gdt;
   Hashtbl.reset import_tbl;
   Hashtbl.reset assert_untainted_functions;
   Hashtbl.reset assert_tainted_functions;
   Hashtbl.reset tainting_rules;
-  Hashtbl.reset typing_rules;
-  Hashtbl.clear heap_override;;
+  Hashtbl.reset typing_rules;;
 
+(** returns size of content, rounded to the next multiple of operand_sz *)
+let size_of_content c =
+  let round_sz sz =
+    if sz < !operand_sz then
+      !operand_sz
+    else
+      if sz mod !operand_sz <> 0 then
+        !operand_sz * (sz / !operand_sz + 1)
+      else
+        sz
+  in
+  match c with
+  | Content z | CMask (z, _) -> round_sz (Z.numbits (snd z))
+  | Bytes b | Bytes_Mask (b, _) -> (String.length (snd b))*4

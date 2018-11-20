@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -63,24 +63,41 @@ module Word: sig
     (** [sign_extension w n] sign extends _w_ to be on _n_ bits *)
     val size_extension: t -> int -> t
 
+  (** returns the list of byte-size words constituting the given word. LSB first *)
+    val to_bytes: t -> t list
+      
   end
 
 (** Address Data Type *)
 module Address: sig
 
+  (** unique identifier type of a heap chunk *)
+  type heap_id_t = int
+
+  (** trick to ensure that address into the heap have the same size as in global and stack region *)
+  type pos = int option (** None means an address that can be used as a key in any environment 
+                            Some n represents the symbolic nth byte of a heap address *)
+    
   (** these memory regions are supposed not to overlap *)
   type region =
     | Global (** abstract base address of global variables and code *)
-    | Stack (** abstract base address of the stack *)
-    | Heap (** abstract base address of a dynamically allocated memory block *)
+    | Heap of heap_id_t * Z.t (** abstract base address of a dynamically allocated memory block. The Z.t integer is the size in bits of the allocation *)
 
-
+  (** conversion from Config.region to region *)
+  val region_from_config: Config.region -> region
+    
   (** string conversion of a region *)
   val string_of_region: region -> string
-
+    
   (** data type of an address *)
   type t = region * Word.t
 
+  (** value of the NULL address *)
+  val of_null: unit -> t
+
+  (** returns true whenever the given address is the NULL address *)
+  val is_null: t -> bool
+    
   (** returns zero if the two parameters are equal
       a negative integer if the first one is less than the second one
       a positive integer otherwise *)
@@ -143,6 +160,16 @@ module Address: sig
   (** extends the size in bits of the given address *)
   val size_extension: t -> int -> t
 
+  (** returns a fresh heap region of the given size (in bits). The id of the new region is also returned *)
+  val new_heap_region: Z.t -> region * int
+
+  (** returns the heap region associated to the given heap id. The size of the region is also returned *)
+  val get_heap_region: int -> region * Z.t
+
+  (** returns the size of the heap region in bits *)
+  val size_of_heap_region: int -> Z.t
+  (** may raise Not_found *)
+ 
   (** set of addresses *)
   module Set: (Set.S with type elt = t)
 

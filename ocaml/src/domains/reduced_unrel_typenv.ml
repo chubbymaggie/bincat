@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -52,7 +52,7 @@ module Make(D: Unrel.T) =
 
   let add_register r (uenv, tenv) = U.add_register r uenv, T.add_register r tenv
 
-  let to_string (uenv, tenv) = (U.to_string uenv) @ (T.to_string tenv)
+  let to_string (uenv, tenv) id = (U.to_string uenv id) @ (T.to_string tenv)
 
   let value_of_register (uenv, _tenv) r = U.value_of_register uenv r
 
@@ -117,12 +117,12 @@ module Make(D: Unrel.T) =
 
   let widen (uenv1, tenv1) (uenv2, tenv2) = U.widen uenv1 uenv2, T.widen tenv1 tenv2
 
-  let set_memory_from_config a r c n (uenv, tenv) =
-    let uenv', taint = U.set_memory_from_config a r c n uenv in
+  let set_memory_from_config a c n (uenv, tenv) =
+    let uenv', taint = U.set_memory_from_config a c n uenv in
     (uenv', tenv), taint
 
-  let set_register_from_config register region (c: Config.cvalue option * Config.tvalue list) (uenv, tenv) =
-    let uenv', taint = U.set_register_from_config register region c uenv in
+  let set_register_from_config register (c: Config.cvalue option * Config.tvalue list) (uenv, tenv) =
+    let uenv', taint = U.set_register_from_config register c uenv in
     (uenv', tenv), taint
 
   let taint_register_mask r c (uenv, tenv): t * Taint.t =

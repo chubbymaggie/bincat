@@ -11,6 +11,7 @@ It features:
 * taint analysis
 * type reconstruction and propagation
 * backward and forward analysis
+* use-after-free and double-free detection
 
 ### In action
 
@@ -32,6 +33,7 @@ Supported CPU for analysis (for now):
 * x86-32
 * ARMv7
 * ARMv8
+* PowerPC
 
 ## Installation
 
@@ -39,7 +41,8 @@ Supported CPU for analysis (for now):
 
 ### Binary distribution install (recommended)
 
-The [binary distribution](https://github.com/airbus-seclab/bincat/releases) includes everything needed:
+The [binary distribution](https://github.com/airbus-seclab/bincat/releases)
+includes everything needed:
 
 * the analyzer
 * the IDA plugin
@@ -59,7 +62,10 @@ The analyzer can be used locally or through a Web service.
 
 On Linux:
 * Using Docker: [Docker installation instructions](doc/install_docker.md)
-* Manual: [Manual installation instructions](doc/install_manual.md)
+* Manual: [build and installation instructions](doc/install_manual.md)
+
+On Windows:
+* [build instructions](doc/windows_build.md)
 
 #### IDA Plugin
 

@@ -41,11 +41,11 @@ def reg_len(regname):
             "x30": 64, "sp": 64,
             "q0": 128, "q1": 128, "q2": 128, "q3": 128, "q4": 128, "q5": 128,
             "q6": 128, "q7": 128, "q8": 128, "q9": 128, "q10": 128, "q11": 128,
-            "q12": 128, "q13": 128, "q14": 128, "q15": 128, "q16": 128, "q17": 128,
-            "q18": 128, "q19": 128, "q20": 128, "q21": 128, "q22": 128, "q23": 128,
-            "q24": 128, "q25": 128, "q26": 128, "q27": 128, "q28": 128, "q29": 128,
-            "q30": 128, "q31": 128,
-            "pc": 64, "xzr":64,"c": 1, "n": 1, "v": 1, "z": 1}[regname]
+            "q12": 128, "q13": 128, "q14": 128, "q15": 128, "q16": 128,
+            "q17": 128, "q18": 128, "q19": 128, "q20": 128, "q21": 128,
+            "q22": 128, "q23": 128, "q24": 128, "q25": 128, "q26": 128,
+            "q27": 128, "q28": 128, "q29": 128, "q30": 128, "q31": 128,
+            "pc": 64, "xzr": 64, "c": 1, "n": 1, "v": 1, "z": 1}[regname]
     elif CFA.arch == "armv7":
         return {
             "r0": 32, "r1": 32, "r2": 32, "r3": 32, "r4": 32, "r5": 32,
@@ -60,30 +60,42 @@ def reg_len(regname):
             "sp": 16, "bp": 16, "cs": 16, "ds": 16, "es": 16, "ss": 16,
             "fs": 16, "gs": 16,
             "iopl": 2,
-            "mxcsr_fz":1, "mxcsr_round":2, "mxcsr_pm":1, "mxcsr_um":1,
-            "mxcsr_om":1, "mxcsr_zm":1, "mxcsr_dm":1, "mxcsr_im":1,
-            "mxcsr_daz":1, "mxcsr_pe":1, "mxcsr_ue":1, "mxcsr_oe":1,
-            "mxcsr_ze":1, "mxcsr_de":1, "mxcsr_ie":1,
-            "xmm0":128, "xmm1":128, "xmm2":128, "xmm3":128,
-            "xmm4":128, "xmm5":128, "xmm6":128, "xmm7":128,
-            "st_ptr":3, "c0" : 1, "c1" : 1, "c2": 1, "c3": 1,
+            "mxcsr_fz": 1, "mxcsr_round": 2, "mxcsr_pm": 1, "mxcsr_um": 1,
+            "mxcsr_om": 1, "mxcsr_zm": 1, "mxcsr_dm": 1, "mxcsr_im": 1,
+            "mxcsr_daz": 1, "mxcsr_pe": 1, "mxcsr_ue": 1, "mxcsr_oe": 1,
+            "mxcsr_ze": 1, "mxcsr_de": 1, "mxcsr_ie": 1,
+            "xmm0": 128, "xmm1": 128, "xmm2": 128, "xmm3": 128,
+            "xmm4": 128, "xmm5": 128, "xmm6": 128, "xmm7": 128,
+            "st_ptr": 3, "c0": 1, "c1": 1, "c2": 1, "c3": 1,
             "cf": 1, "pf": 1, "af": 1, "zf": 1, "sf": 1, "tf": 1, "if": 1,
             "df": 1, "of": 1, "nt": 1, "rf": 1, "vm": 1, "ac": 1, "vif": 1,
             "vip": 1, "id": 1}[regname]
+    elif CFA.arch == "powerpc":
+        return {
+            "r0": 32, "r1": 32, "r2": 32, "r3": 32, "r4": 32, "r5": 32,
+            "r6": 32, "r7": 32, "r8": 32, "r9": 32, "r10": 32, "r11": 32,
+            "r12": 32, "r13": 32, "r14": 32, "r15": 32, "r16": 32, "r17": 32,
+            "r18": 32, "r19": 32, "r20": 32, "r21": 32, "r22": 32, "r23": 32,
+            "r24": 32, "r25": 32, "r26": 32, "r27": 32, "r28": 32, "r29": 32,
+            "r30": 32, "r31": 32, "lr": 32, "ctr": 32, "cr": 32,
+            "tbc": 7, "so": 1, "ov": 1, "ca": 1}[regname]
     else:
         raise KeyError("Unkown arch %s" % CFA.arch)
 
 
 #: maps short region names to pretty names
-PRETTY_REGIONS = {'': 'global', 's': 'stack', 'h': 'heap',
+PRETTY_REGIONS = {'': 'global', 'h': 'heap',
                   'b': 'bottom', 't': 'top'}  # used for pointers only
 
 #: split src region + address (left of '=')
-RE_REGION_ADDR = re.compile("(?P<region>reg|mem)\s*\[(?P<addr>[^]]+)\]")
+RE_REGION_ADDR = re.compile(r"(?P<region>reg|mem|h[0-9]+)\[(?P<addr>[^]]+)\]")
 #: split value
 
 RE_VALTAINT = re.compile(
-    "(?P<memreg>[a-zA-Z]?)(?P<value>0[xb][0-9a-fA-F_?]+)(!(?P<taint>\S+)|)?")
+    r"(?P<memreg>([a-zA-Z]?|[hH]\d+))-?(?P<value>0[xb][0-9a-fA-F_?]+)(!(?P<taint>\S+)|)?")
+
+RE_NODE_UNREL = re.compile(
+    r"node (?P<nodeid>\d+) - unrel (?P<unrelid>\d+)")
 
 
 class PyBinCATParseError(PyBinCATException):
@@ -92,28 +104,32 @@ class PyBinCATParseError(PyBinCATException):
 
 class CFA(object):
     """
-    Holds State for each defined node_id.
+    Holds Node for each defined node_id.
     Several node_ids may share the same address (ex. loops, partitions)
     """
     #: Cache to speed up value parsing. (str, length) -> [Value, ...]
     _valcache = {}
     arch = None
 
-    def __init__(self, states, edges, nodes):
+    def __init__(self, addr_nodes, edges, nodes, taintsrcs):
         #: Value (address) -> [node_id]. Nodes marked "final" come first.
-        self.states = states
+        self.addr_nodes = addr_nodes
         #: node_id (string) -> list of node_id (string)
         self.edges = edges
-        #: node_id (string) -> State
+        #: node_id (string) -> Node
         self.nodes = nodes
         self.logs = None
+        #: taint source id (int) -> taint source (str)
+        self.taintsrcs = taintsrcs
 
     @classmethod
     def parse(cls, filename, logs=None):
 
-        states = defaultdict(list)
+        addr_nodes = defaultdict(list)
         edges = defaultdict(list)
         nodes = {}
+        taintsrcs = {}
+        cfa = cls(addr_nodes, edges, nodes, taintsrcs)
 
         config = ConfigParser.RawConfigParser()
         try:
@@ -129,10 +145,18 @@ class CFA(object):
             raise PyBinCATException(
                 "Parsing error: no sections in %s, check analysis logs" %
                 filename)
-            return None
 
         cls.arch = config.get('loader', 'architecture')
-        for section in config.sections():
+        cls.mem_sz = config.get('program', 'mem_sz')
+        # parse taint sources first -- will be used when parsing Node
+        # sorting ensures that a node will be parsed before its unrels
+        sections = sorted(config.sections(), reverse=True)
+        if 'taint sources' in config.sections():
+            for srcid, srcname in config.items('taint sources'):
+                taintsrcs[int(srcid)] = srcname
+            sections.remove('taint sources')
+            maxtaintsrcid = max(list(taintsrcs)+[0])
+        for section in sections:
             if section == 'edges':
                 for edgename, edge in config.items(section):
                     src, dst = edge.split(' -> ')
@@ -140,19 +164,25 @@ class CFA(object):
                 continue
             elif section.startswith('node = '):
                 node_id = section[7:]
-                state = State.parse(node_id, dict(config.items(section)))
-                address = state.address
-                if state.final:
-                    states[address].insert(0, state.node_id)
+                node = Node.parse(node_id, dict(config.items(section)),
+                                  maxtaintsrcid)
+                address = node.address
+                if node.final:
+                    addr_nodes[address].insert(0, node.node_id)
                 else:
-                    states[address].append(state.node_id)
-                nodes[state.node_id] = state
+                    addr_nodes[address].append(node.node_id)
+                nodes[node.node_id] = node
                 continue
+            elif section.startswith('node '):
+                m = RE_NODE_UNREL.match(section)
+                unrel_id = m.group('unrelid')
+                new_unrel = Unrel.parse(unrel_id, dict(config.items(section)))
+                cfa[m.group('nodeid')].unrels[unrel_id] = new_unrel
+                # unrel
             elif section == 'loader':
                 continue
 
         CFA._valcache = dict()
-        cfa = cls(states, edges, nodes)
         if logs:
             cfa.logs = open(logs, 'rb').read()
         return cfa
@@ -166,17 +196,6 @@ class CFA(object):
         logfile = tempfile.NamedTemporaryFile()
 
         return cls.from_filenames(initfname, outfile.name, logfile.name)
-
-    @classmethod
-    def from_state(cls, state):
-        """
-        Runs analysis.
-        """
-        initfile = tempfile.NamedTemporaryFile()
-        initfile.write(str(state))
-        initfile.close()
-
-        return cls.from_analysis(initfile.name)
 
     @classmethod
     def from_filenames(cls, initfname, outfname, logfname):
@@ -211,7 +230,7 @@ class CFA(object):
 
     def __getitem__(self, node_id):
         """
-        Returns State at provided node_id if it exists, else None.
+        Returns Node at provided node_id if it exists, else None.
         """
         if type(node_id) is int:
             node_id = str(node_id)
@@ -219,50 +238,289 @@ class CFA(object):
 
     def node_id_from_addr(self, addr):
         addr = self._toValue(addr)
-        return self.states[addr]
+        return self.addr_nodes[addr]
 
-    def next_states(self, node_id):
+    def next_nodes(self, node_id):
         """
-        Returns a list of State
+        Returns a list of Node
         """
         return [self[n] for n in self.edges[str(node_id)]]
 
 
-class State(object):
+class Node(object):
     """
-    Contains memory & registers status
+    Stores node data for a given node_id.
 
-    bincat output format examples:
-    reg [eax] = S0xfff488!0
-    111  222    33333333333
-
-    mem[G0x1234, G0x1236] = G0x20, G0x0
-    111 2222222222222222    33333  3333 <-- list of 2 valtaint
-
-    mem[G0x24*32] = G0b????1111!0b????0000
-    111 22222222    3333333333333333333333 <-- list of 1 valtaint
-
-    1: src region (overridden with src region contained in address for memory)
-    2: address
-    3: dst region, value, taint (valtaint)
-
-    example valtaints: G0x1234 G0x12!0xF0 S0x12!ALL
+    1 or more Unrel may be stored, each containg regaddrs, regtypes
     """
-    __slots__ = ['address', 'node_id', '_regaddrs', '_regtypes', 'final',
-                 'statements', 'bytes', 'tainted', 'taintsrc', '_outputkv']
+    __slots__ = ['address', 'node_id', 'final', 'statements', 'bytes',
+                 'tainted', 'taintsrc', 'unrels']
 
     def __init__(self, node_id, address=None, lazy_init=None):
         self.address = address
         #: str
         self.node_id = node_id
-        #: Value -> [Value]. Either 1 value, or a list of 1-byte Values.
-        self._regaddrs = {}
-        #: Value -> "type"
-        self._regtypes = {}
+        #: str (unrel id) -> Unrel
+        self.unrels = {}
         self.final = False
         self.statements = ""
         self.bytes = ""
         self.tainted = False
+        #: list of taint id (int)
+        self.taintsrc = []
+
+    @classmethod
+    def parse(cls, node_id, outputkv, maxtaintsrcid):
+        """
+        :param outputkv: list of (key, value) tuples for each property set by
+            the analyzer at this EIP
+        """
+
+        new_node = Node(node_id)
+        addr = outputkv.pop("address")
+        m = RE_VALTAINT.match(addr)
+        new_node.address = Value(m.group("memreg"),
+                                 int(m.group("value"), 0), 0)
+        new_node.final = outputkv.pop("final", None) == "true"
+        new_node.statements = outputkv.pop("statements", "")
+        new_node.bytes = outputkv.pop("bytes", "")
+        taintedstr = outputkv.pop("tainted", "")
+        if taintedstr == "true":
+            # v0.6 format
+            tainted = True
+            taintsrc = ["t-0"]
+        elif taintedstr == "" or taintedstr.startswith("?"):  # XXX awaiting bugfix == "?":
+            # v0.7+ format, not tainted
+            tainted = False
+            taintsrc = []
+        elif taintedstr.startswith("_"):  # XXX == "_":
+            # XXX "tainted=__" should not happen -- awaiting bugfix
+            # v1.0 format, tainted = BOT
+            tainted = True
+            taintsrc = ["t-" + str(maxtaintsrcid)]
+        else:
+            # v0.7+ format, tainted
+            taintsrc = map(str.strip, taintedstr.split(','))
+            tainted = True
+        new_node.tainted = tainted
+        new_node.taintsrc = taintsrc
+        return new_node
+
+    def default_unrel_id(self):
+        ids = sorted(self.unrels.keys())
+        if not ids:
+            return None
+        return ids[0]
+
+    def __repr__(self):
+        return "Node at address %s (node=%s)" % (self.address, self.node_id)
+
+
+@functools.total_ordering
+class Value(object):
+    __slots__ = ['vtop', 'vbot', 'taint', 'ttop', 'tbot', 'length', 'value', 'region']
+
+    def __init__(self, region, value, length=None, vtop=0, vbot=0, taint=0,
+                 ttop=0, tbot=0):
+        self.region = region.lower()
+        self.value = value
+        if not length and region == 'reg':
+            self.length = reg_len(value)
+        else:
+            self.length = length
+        self.vtop = vtop
+        self.vbot = vbot
+        self.taint = taint
+        self.ttop = ttop
+        self.tbot = tbot
+
+    @classmethod
+    def parse(cls, region, s, t, length):
+        region = region.lower()
+        value, vtop, vbot = parsers.parse_val(s)
+        if type(value) is int and length != 0:
+            value &= 2**length-1
+            vtop &= 2**length-1
+            vbot &= 2**length-1
+        if t is None or t == "NONE":
+            taint, ttop, tbot = (0, 0, 0)
+        elif t == "ALL":
+            taint, ttop, tbot = (2**length-1, 0, 0)
+        else:
+            taint, ttop, tbot = parsers.parse_val(t)
+        return cls(region, value, length, vtop, vbot, taint, ttop, tbot)
+
+    @property
+    def prettyregion(self):
+        return PRETTY_REGIONS.get(self.region, self.region)
+
+    def __len__(self):
+        return self.length
+
+    def __repr__(self):
+        return "Value(%s, %s ! %s)" % (
+            self.region,
+            self.__valuerepr__(),
+            self.__taintrepr__())
+
+    def __valuerepr__(self, base=None, merged=False):
+        return parsers.val2str(self.value, self.vtop, self.vbot, self.length, base, merged)
+
+    def __taintrepr__(self, base=None, merged=False):
+        return parsers.val2str(self.taint, self.ttop, self.tbot, self.length, base, merged)
+
+    def __hash__(self):
+        return hash((type(self), self.region, self.value,
+                     self.vtop, self.vbot, self.taint,
+                     self.ttop, self.tbot))
+
+    def __eq__(self, other):
+        if type(other) != Value:
+            return False
+        return (self.region == other.region and
+                self.value == other.value and self.taint == other.taint and
+                self.vtop == other.vtop and self.ttop == other.ttop and
+                self.vbot == other.vbot and self.tbot == other.tbot)
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __lt__(self, other):
+        return (self.region, self.value) < (other.region, other.value)
+
+    def __add__(self, other):
+
+        newlen = max(self.length, getattr(other, "length", 0))
+        other = getattr(other, "value", other)
+        if other == 0:
+            # special case, useful when the value is a register name
+            return self
+
+        mask = (1 << newlen)-1
+        newval = self.value + other
+        if mask:
+            newval = newval & mask
+        # XXX clear value where top or bottom mask is not null
+        # XXX complete implementation
+
+        return self.__class__(self.region,
+                              newval,
+                              newlen,
+                              self.vtop, self.vbot, self.taint,
+                              self.ttop, self.tbot)
+
+    def __and__(self, other):
+        """ concatenation """
+        if self.region != other.region:
+            raise TypeError(
+                "Concatenation can only be performed between Value objects "
+                "having the same region. %s != %s", self.region, other.region)
+        return self.__class__(
+            region=self.region,
+            value=(self.value << other.length) + other.value,
+            length=self.length+other.length,
+            vtop=(self.vtop << other.length) + other.vtop,
+            vbot=(self.vbot << other.length) + other.vbot,
+            taint=(self.taint << other.length) + other.taint,
+            ttop=(self.ttop << other.length) + other.ttop,
+            tbot=(self.tbot << other.length) + other.tbot,
+            )
+
+    def __sub__(self, other):
+        newlen = max(self.length, getattr(other, "length", 0))
+        other = getattr(other, "value", other)
+
+        mask = (1 << newlen)-1
+
+        newvalue = (self.value-other) & mask
+        # XXX clear value where top or bottom mask is not null
+        # XXX complete implementation
+        return self.__class__(self.region, newvalue, self.length,
+                              self.vtop, self.vbot, self.taint,
+                              self.ttop, self.tbot)
+
+    def __getitem__(self, idx):
+        if type(idx) is slice:
+            if idx.step is not None:
+                raise TypeError
+            start = idx.start
+            stop = idx.stop
+        else:
+            start = idx
+            stop = idx + 1
+        if start >= self.length or start < 0:
+            raise IndexError
+        if stop > self.length or stop <= 0:
+            raise IndexError
+        if stop - start <= 0:
+            raise IndexError
+
+        def mask(x):
+            return (x >> (8*start)) & (2**(8*(stop-start))-1)
+
+        return Value(self.region,
+                     mask(self.value),
+                     8*(stop-start),
+                     mask(self.vtop),
+                     mask(self.vbot),
+                     mask(self.taint),
+                     mask(self.ttop),
+                     mask(self.tbot))
+
+    def is_concrete(self):
+        return self.vtop == 0 and self.vbot == 0
+
+    def is_tainted(self):
+        return (self.taint != 0 or
+                self.ttop != 0 or
+                self.tbot != 0)
+
+    def split_to_bytelist(self):
+        """
+        Return a list of 8-byte long Values, having the same value as self
+        """
+        result = []
+
+        def mask(x, pos):
+            return (x >> pos) & 0xFF
+
+        for i in range(self.length/8):
+            result.append(self[i])
+
+        return result
+
+
+class Unrel(object):
+    """
+    Contains memory & registers status for a given (Node, unrel_id)
+
+    bincat output format examples:
+    reg [eax] = 0xfff488!0
+    111  222    33333333333
+
+    mem[0x1234, 0x1236] = 0x20, 0x0
+    111 2222222222222222  33333 3333 <-- list of 2 valtaint
+
+    mem[0x24*32] = 0b????1111!0b????0000
+    111 22222222   3333333333333333333333 <-- list of 1 valtaint
+
+    1: src region (overridden with src region contained in address for memory)
+    2: address
+    3: dst region, value, taint (valtaint)
+
+    example valtaints: 0x1234 0x12!0xF0 0x12!ALL
+    """
+    __slots__ = ['_regaddrs', '_regtypes', '_outputkv', 'unrel_id', 'description']
+
+    def __init__(self, unrel_id):
+        #: Value -> [Value]. Either 1 value, or a list of 1-byte Values.
+        self._regaddrs = {}
+        #: Value -> "type"
+        self._regaddrs = None
+        self._regtypes = None
+        self._outputkv = None
+        #: str
+        self.unrel_id = unrel_id
 
     @property
     def regaddrs(self):
@@ -273,7 +531,7 @@ class State(object):
                 import traceback
                 traceback.print_exc(e)
                 raise PyBinCATException(
-                    "Cannot parse taint or type data at address %s\n%s" %
+                    "Cannot parse taint or type data at address %s\n%r" %
                     (self.address, e))
         return self._regaddrs
 
@@ -291,38 +549,10 @@ class State(object):
         return self._regtypes
 
     @classmethod
-    def parse(cls, node_id, outputkv):
-        """
-        :param outputkv: list of (key, value) tuples for each property set by
-            the analyzer at this EIP
-        """
-
-        new_state = State(node_id)
-        addr = outputkv.pop("address")
-        m = RE_VALTAINT.match(addr)
-        new_state.address = Value(m.group("memreg"), int(m.group("value"), 0), 0)
-        new_state.final = outputkv.pop("final", None) == "true"
-        new_state.statements = outputkv.pop("statements", "")
-        new_state.bytes = outputkv.pop("bytes", "")
-        taintedstr = outputkv.pop("tainted", "")
-        if taintedstr == "true":
-            # v0.6 format
-            tainted = True
-            taintsrc = ["t-0"]
-        elif taintedstr == "" or taintedstr == "?":
-            # v0.7 format, not tainted
-            tainted = False
-            taintsrc = []
-        else:
-            # v0.7 format, tainted
-            taintsrc = map(str.strip, taintedstr.split(','))
-            tainted = True
-        new_state.tainted = tainted
-        new_state.taintsrc = taintsrc
-        new_state._outputkv = outputkv
-        new_state._regaddrs = None
-        new_state._regtypes = None
-        return new_state
+    def parse(cls, unrel_id, outputkv):
+        new_unrel = Unrel(unrel_id)
+        new_unrel._outputkv = outputkv
+        return new_unrel
 
     def parse_regaddrs(self):
         """
@@ -331,6 +561,9 @@ class State(object):
         self._regaddrs = {}
         self._regtypes = {}
         for k, v in self._outputkv.iteritems():
+            if k == "description":
+                self.description = k
+                continue
             if k.startswith("t-"):
                 typedata = True
                 k = k[2:]
@@ -345,14 +578,14 @@ class State(object):
             if region == "mem":
                 # use memreg as region instead of 'mem'
                 # ex. "s0xabcd, s0xabce" "g0x24*32"
-                # region in ['s', 'g', 'h']
+                # region = ''
                 if '*' in addr:
                     # single repeated value
-                    regaddr, l = addr.split('*')
+                    regaddr, repeat = addr.split('*')
                     length = 8
                     m = RE_VALTAINT.match(regaddr)
                     region, addr = m.group('memreg'), m.group('value')
-                    v = ', '.join([v] * int(l))
+                    v = ', '.join([v] * int(repeat))
                 else:
                     regaddr1, regaddr2 = addr.split(', ')
                     m = RE_VALTAINT.match(regaddr1)
@@ -363,6 +596,10 @@ class State(object):
                     region = region1
                     length = 8
                     # XXX allow non-aligned access (current: assume no overlap)
+            elif region and region[0] == "h":
+                # ignore for now -- indicates whether this Heap region has been
+                # allocated or freed
+                continue
             elif region == "reg":
                 length = reg_len(addr)
 
@@ -370,7 +607,10 @@ class State(object):
             concat_value = []
             regaddr = Value.parse(region, addr, '0', 0)
             if typedata:
-                self._regtypes[regaddr] = v.split(', ')
+                if regaddr in self._regtypes:
+                    self._regtypes[regaddr] += " -- " + v
+                else:
+                    self._regtypes[regaddr] = v
                 continue
             if (v, length) not in CFA._valcache:
                 # add to cache
@@ -384,6 +624,14 @@ class State(object):
                     strval = m.group("value")
                     taint = m.group("taint")
                     new_value = Value.parse(memreg, strval, taint, length)
+                    if new_value.region:
+                        curregaddr = regaddr + idx
+                        regstr = "region " + new_value.region
+                        if curregaddr in self._regtypes:
+                            self._regtypes[curregaddr] = (
+                                regstr + " - " + self._regtypes[curregaddr])
+                        else:
+                            self._regtypes[curregaddr] = regstr
                     # concatenate
                     concat_value.append(new_value)
 
@@ -391,7 +639,21 @@ class State(object):
                 CFA._valcache[(v, length)] = off_vals
             for val in CFA._valcache[(v, length)]:
                 self._regaddrs[regaddr] = val
-        del(self._outputkv)
+
+        del self._outputkv
+
+    def getregtype(self, item):
+        """
+        :param item: Value (address)
+        Return str
+        """
+        if type(item) is str:
+            # register, used for debugging (ex. human input from IDA)
+            item = Value('reg', item, '0', 0)
+        if type(item) is not Value:
+            raise KeyError
+        if item in self.regtypes:
+            return self.regtypes[item]
 
     def __getitem__(self, item):
         """
@@ -409,13 +671,12 @@ class State(object):
             for addr in self.regaddrs:
                 if addr.region != item.region:
                     continue
-                vlist = self.regaddrs[addr]
-                v0 = vlist[0]
                 if item.value < addr.value:
                     continue
+                vlist = self.regaddrs[addr]
                 if addr.value + len(vlist) > item.value:
                     return vlist[item.value-addr.value:]
-            raise IndexError
+            raise IndexError(item)
 
     def mem_ranges(self):
         """
@@ -450,7 +711,7 @@ class State(object):
                 r = self[Value(region, i)]
             except IndexError:
                 i += 1
-                m.append(Value(region, 0,vtop=0,vbot=0xff))
+                m.append(Value(region, 0, vtop=0, vbot=0xff))
             else:
                 m += r
                 i += len(r)
@@ -557,7 +818,7 @@ class State(object):
         Returns a set of (region, name) for which value or tainting
         differ between self and other.
         """
-        # List keys present in only one of the states
+        # List keys present in only one of the nodes
         sRA = set(self.regaddrs)
         oRA = set(other.regaddrs)
         results = sRA.symmetric_difference(oRA)
@@ -594,178 +855,3 @@ class State(object):
                 res.append("+ %s" % (other.regaddrs[regaddr]))
         return "\n".join(res)
 
-    def __repr__(self):
-        return "State at address %s (node=%s)" % (self.address, self.node_id)
-
-
-@functools.total_ordering
-class Value(object):
-    __slots__ = ['vtop', 'vbot', 'taint', 'ttop', 'tbot', 'length', 'value', 'region']
-
-    def __init__(self, region, value, length=None, vtop=0, vbot=0, taint=0,
-                 ttop=0, tbot=0):
-        self.region = region.lower()
-        self.value = value
-        if not length and region == 'reg':
-            self.length = reg_len(value)
-        else:
-            self.length = length
-        self.vtop = vtop
-        self.vbot = vbot
-        self.taint = taint
-        self.ttop = ttop
-        self.tbot = tbot
-
-    @classmethod
-    def parse(cls, region, s, t, length):
-        if region == "T":
-            value, vtop, vbot = 0, 2**length-1, 0
-        else:
-            value, vtop, vbot = parsers.parse_val(s)
-        if type(value) is int and length != 0:
-            value &= 2**length-1
-            vtop &= 2**length-1
-            vbot &= 2**length-1
-        if t is None or t == "NONE":
-            taint, ttop, tbot = (0, 0, 0)
-        elif t == "ALL":
-            taint, ttop, tbot = (2**length-1, 0, 0)
-        else:
-            taint, ttop, tbot = parsers.parse_val(t)
-        return cls(region, value, length, vtop, vbot, taint, ttop, tbot)
-
-    @property
-    def prettyregion(self):
-        return PRETTY_REGIONS.get(self.region, self.region)
-
-    def __len__(self):
-        return self.length
-
-    def __repr__(self):
-        return "Value(%s, %s ! %s)" % (
-            self.region,
-            self.__valuerepr__(),
-            self.__taintrepr__())
-
-    def __valuerepr__(self, base=None, merged=False):
-        return parsers.val2str(self.value, self.vtop, self.vbot, self.length, base, merged)
-
-    def __taintrepr__(self, base=None, merged=False):
-        return parsers.val2str(self.taint, self.ttop, self.tbot, self.length, base, merged)
-
-    def __hash__(self):
-        return hash((type(self), self.region, self.value,
-                     self.vtop, self.vbot, self.taint,
-                     self.ttop, self.tbot))
-
-    def __eq__(self, other):
-        if type(other) != Value:
-            return False
-        return (self.region == other.region and
-                self.value == other.value and self.taint == other.taint and
-                self.vtop == other.vtop and self.ttop == other.ttop and
-                self.vbot == other.vbot and self.tbot == other.tbot)
-
-    def __ne__(self, other):
-        return not (self == other)
-
-    def __lt__(self, other):
-        return (self.region, self.value) < (other.region, other.value)
-
-    def __add__(self, other):
-        
-        newlen = max(self.length, getattr(other, "length", 0))
-        other = getattr(other, "value", other)
-        if other == 0:
-            # special case, useful when the value is a register name
-            return self
-
-        mask = (1 << newlen)-1
-        # XXX clear value where top or bottom mask is not null
-        # XXX complete implementation
-        
-        return self.__class__(self.region,
-                              (self.value+other) & mask,
-                              newlen,
-                              self.vtop , self.vbot, self.taint,
-                              self.ttop, self.tbot)
-
-    def __and__(self, other):
-        """ concatenation """
-        if self.region != other.region:
-            raise TypeError(
-                "Concatenation can only be performed between Value objects "
-                "having the same region. %s != %s", self.region, other.region)
-        return self.__class__(
-            region=self.region,
-            value=(self.value << other.length) + other.value,
-            length=self.length+other.length,
-            vtop=(self.vtop << other.length) + other.vtop,
-            vbot=(self.vbot << other.length) + other.vbot,
-            taint=(self.taint << other.length) + other.taint,
-            ttop=(self.ttop << other.length) + other.ttop,
-            tbot=(self.tbot << other.length) + other.tbot,
-            )
-
-    def __sub__(self, other):
-        newlen = max(self.length, getattr(other, "length", 0))
-        other = getattr(other, "value", other)
-
-        mask = (1 << newlen)-1
-        
-        newvalue = (self.value-other) & mask
-        # XXX clear value where top or bottom mask is not null
-        # XXX complete implementation
-        return self.__class__(self.region, newvalue, self.length,
-                              self.vtop, self.vbot, self.taint,
-                              self.ttop, self.tbot)
-
-    def __getitem__(self, idx):
-        if type(idx) is slice:
-            if idx.step is not None:
-                raise TypeError
-            start = idx.start
-            stop = idx.stop
-        else:
-            start = idx
-            stop = idx + 1
-        if start >= self.length or start < 0:
-            raise IndexError
-        if stop > self.length or stop <= 0:
-            raise IndexError
-        if stop - start <= 0:
-            raise IndexError
-
-        def mask(x):
-            return (x >> (8*start)) & (2**(8*(stop-start))-1)
-
-        return Value(self.region,
-                     mask(self.value),
-                     8*(stop-start),
-                     mask(self.vtop),
-                     mask(self.vbot),
-                     mask(self.taint),
-                     mask(self.ttop),
-                     mask(self.tbot))
-
-    def is_concrete(self):
-        return self.vtop == 0 and self.vbot == 0
-
-    def is_tainted(self):
-        return (self.taint != 0 or
-                self.ttop != 0 or
-                self.tbot != 0)
-
-    def split_to_bytelist(self):
-        """
-        Return a list of 8-byte long Values, having the same value as self
-        """
-        result = []
-
-        def mask(x, pos):
-            return (x >> pos) & 0xFF
-
-        for i in range(self.length/8):
-            result.append(self[i])
-
-        return result

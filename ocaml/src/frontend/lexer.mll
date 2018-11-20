@@ -19,8 +19,112 @@
 {
   open Parser
   open Lexing
-    exception SyntaxError of string
+  exception SyntaxError of string
+
+  (* keyword table *)
+let keywords = Hashtbl.create 50
+let _ =
+  List.iter (fun (keyword, token) -> Hashtbl.replace keywords keyword token)
+     ["state", STATE;
+    (* program section *)
+     "program", PROGRAM;
+     "load_elf_coredump", LOAD_ELF_COREDUMP;
+    (* analyzer section *)
+     "analyzer", ANALYZER;
+    (* sections section *)
+     "section", SECTION;
+     "sections", SECTIONS;
+    "architecture", ARCHITECTURE;
+    "armv7", ARMV7;
+    "ARMv7", ARMV7;
+    "armv8", ARMV8;
+    "ARMv8", ARMV8;
+    "powerpc", POWERPC;
+    "PowerPC", POWERPC;
+    "POWERPC", POWERPC;
+    "ppc"    , POWERPC;
+    "PPC"    , POWERPC;
+    "processor_version", PROCESSOR_VERSION;
+    "endianness", ENDIANNESS;
+    "little", LITTLE;
+    "big", BIG;
+    "x86", X86;
+    (* settings tokens *)
+    "mem_model", MEM_MODEL;
+    "op_sz", OP_SZ;
+    "mem_sz", MEM_SZ;
+    "stack_width", STACK_WIDTH;
+    "call_conv", CALL_CONV;
+    "flat", FLAT;
+    "segmented", SEGMENTED;
+    "cdecl", CDECL;
+    "stdcall", STDCALL;
+    "fastcall", FASTCALL;
+    "aapcs", AAPCS;
+    "svr", SVR;
+    (* analyzer tokens *)
+    "ini_version", INI_VERSION;
+    "unroll", UNROLL;
+    "function_unroll", FUN_UNROLL;
+    "kset_bound", KSET_BOUND;
+    "external_symbol_max_size", EXT_SYM_MAX_SIZE;
+    "cut", CUT;
+    "loglevel", LOGLEVEL;
+    "store_marshalled_cfa", STORE_MCFA;
+    "in_marshalled_cfa_file", IN_MCFA_FILE;
+    "out_marshalled_cfa_file", OUT_MCFA_FILE;
+    "ignore_unknown_relocations", IGNORE_UNKNOWN_RELOCATIONS;
+    (* GDT tokens *)
+    "GDT", GDT;
+    (* loader tokens *)
+    "ss", SS;
+    "ds", DS;
+    "cs", CS;
+    "es", ES;
+    "fs", FS;
+    "gs", GS;
+    "analysis_ep", ENTRYPOINT;
+    (* binary tokens *)
+    "filepath", FILEPATH;
+    "format", FORMAT;
+    "pe", PE;
+    "elf", ELF;
+    "elfobj", ELFOBJ;
+    "manual", MANUAL;
+    "raw", RAW;
+    "mode", MODE;
+    "protected", PROTECTED;
+    "real", REAL;
+    "assert", ASSERT;
+    "call", CALL;
+    "U", U;
+    "T", T;
+    "imports", IMPORTS;
+    "heap", HEAP;
+    "analysis", ANALYSIS;
+    "forward_binary", FORWARD_BIN;
+    "forward_cfa", FORWARD_CFA;
+    "backward", BACKWARD;
+    (* misc left operands *)
+    "headers", HEADER;
+    "override", OVERRIDE;
+    "nop", NOP;
+    "fun_skip", FUN_SKIP;
+    "TAINT_ALL", TAINT_ALL;
+    "TAINT_NONE", TAINT_NONE;
+    "null", NULL
+    ]
+
+let strip_int s =
+  let start = String.sub s 0 1 in
+  let s' =
+    if String.compare start "H" = 0 || String.compare start "S" = 0 then
+      String.sub s 1 ((String.length s)-1)
+    else s
+  in
+  Z.of_string s'
 }
+
 
 
 (* utilities *)
@@ -33,7 +137,9 @@ let hexa_int     = ("0X" | "0x") hex_digits
 let dec_int      = digit+
 let oct_int      = ("0o" | "0O") ['0'-'7']+
 let integer = hexa_int | dec_int | oct_int
-
+let global_integer = ("G" | "") integer
+let heap_integer = "H" integer
+                  
 (* special characters *)
 let path_symbols = '.' | '/' | '\\' | ':'
 let white_space  = [' ' '\t' '\r']+
@@ -45,6 +151,7 @@ let value        = (digit | path_symbols | letter | '_' | '-' | '@')*
 
 (* tokens *)
 rule token = parse
+                 
   (* escape tokens *)
   | white_space         { token lexbuf }
   | newline             { new_line lexbuf; token lexbuf }
@@ -63,7 +170,9 @@ rule token = parse
   | ';'                 { SEMI_COLON }
   | '_'                     { UNDERSCORE }
   (* byte string *)
-  | '|'                 { read_bytes (Buffer.create 80) lexbuf }
+  | '|'                 { HEX_BYTES(read_bytes (Buffer.create 80) lexbuf) }
+  | "G|"                 { HEX_BYTES(read_bytes (Buffer.create 80) lexbuf) }
+  | "H|"                 { HEAP_HEX_BYTES(read_bytes (Buffer.create 80) lexbuf) }
   (* quoted string *)
   | '"'                 { read_string (Buffer.create 80) lexbuf }
   | '@'                 { AT }
@@ -77,91 +186,16 @@ rule token = parse
   | '!'                 { TAINT }
   (* mask for taint or value *)
   | '?'             { MASK }
-  (* state section *)
-  | "state"             { STATE }
-  (* program section *)
-  | "program"                { PROGRAM }
-  | "load_elf_coredump" { LOAD_ELF_COREDUMP }
-  (* analyzer section *)
-  | "analyzer"          { ANALYZER }
-  (* sections section *)
-  | "section"       { SECTION }
-  | "sections"          { SECTIONS }
-  | "architecture"          { ARCHITECTURE }
-  | "armv7"                 { ARMV7 }
-  | "ARMv7"                 { ARMV7 }
-  | "armv8"                 { ARMV8 }
-  | "ARMv8"                 { ARMV8 }
-  | "endianness"            { ENDIANNESS }
-  | "little"                { LITTLE }
-  | "big"                   { BIG }
-  | "x86"       { X86 }
-  (* settings tokens *)
-  | "mem_model"         { MEM_MODEL }
-  | "op_sz"             { OP_SZ }
-  | "mem_sz"            { MEM_SZ }
-  | "stack_width"       { STACK_WIDTH }
-  | "call_conv"         { CALL_CONV }
-  | "flat"              { FLAT }
-  | "segmented"         { SEGMENTED }
-  | "cdecl"             { CDECL }
-  | "stdcall"           { STDCALL }
-  | "fastcall"          { FASTCALL }
-  | "aapcs"             { AAPCS }
-  (* analyzer tokens *)
-  | "ini_version"           { INI_VERSION }
-  | "unroll"            { UNROLL }
-  | "function_unroll"       { FUN_UNROLL }
-  | "external_symbol_max_size" { EXT_SYM_MAX_SIZE }
-  | "cut"                   { CUT }
-  | "loglevel"              { LOGLEVEL }
-  | "store_marshalled_cfa"  { STORE_MCFA }
-  | "in_marshalled_cfa_file"   { IN_MCFA_FILE }
-  | "out_marshalled_cfa_file"   { OUT_MCFA_FILE }
   (* address separator *)
   | ","             { COMMA }
-  (* GDT tokens *)
-  | "GDT"                   { GDT }
-  (* loader tokens *)
-  | "ss"                { SS }
-  | "ds"            { DS }
-  | "cs"                { CS }
-  | "es"            { ES }
-  | "fs"            { FS }
-  | "gs"            { GS }
-  | "analysis_ep"           { ENTRYPOINT }
-  (* binary tokens *)
-  | "filepath"          { FILEPATH }
-  | "format"            { FORMAT }
-  | "pe"            { PE }
-  | "elf"           { ELF }
-  | "elfobj"        { ELFOBJ }
-  | "manual"                { MANUAL }
-  | "raw"                   { RAW }
-  | "mode"                  { MODE }
-  | "protected"             { PROTECTED }
-  | "real"                  { REAL }
-  | "assert"                { ASSERT }
-  | "call"                  { CALL }
-  | "U"                     { U }
-  | "T"                     { T }
-  | "imports"               { IMPORTS }
-  | "stack"                 { STACK }
-  | "heap"                  { HEAP }
-  | "analysis"              { ANALYSIS }
-  | "forward_binary"        { FORWARD_BIN }
-  | "forward_cfa"           { FORWARD_CFA }
-  | "backward"              { BACKWARD }
   (* left operand of type integer *)
-  | integer as i        { INT (Z.of_string i) }
-  (* misc left operands *)
-  | "headers"       { HEADER }
-  | "override"      { OVERRIDE }
-  | "nop"      { NOP }
-  | "fun_skip"      { FUN_SKIP }    
-  | "TAINT_ALL"         { TAINT_ALL }
-  | "TAINT_NONE"        { TAINT_NONE }
-  | value as v      { STRING v }
+  | global_integer as i        { INT (strip_int i) }
+    | heap_integer as i { HINT (strip_int i) }
+    | value as v      {
+                   try
+                     Hashtbl.find keywords v
+                   with Not_found -> STRING v
+                 }
 
 
 
@@ -186,7 +220,7 @@ and read_bytes buf =
   | '|'       { if Buffer.length buf mod 2 != 0 then
                     raise (SyntaxError "Byte string length should be even !")
                 else
-                    HEX_BYTES (Buffer.contents buf)
+                    Buffer.contents buf
               }
   | hex_digits
         { Buffer.add_string buf (Lexing.lexeme lexbuf);

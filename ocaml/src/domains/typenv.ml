@@ -1,6 +1,6 @@
 (*
     This file is part of BinCAT.
-    Copyright 2014-2017 - Airbus Group
+    Copyright 2014-2018 - Airbus
 
     BinCAT is free software: you can redistribute it and/or modify
     it under the terms of the GNU Affero General Public License as published by
@@ -22,10 +22,12 @@
 
  type t =
    | BOT (** bottom *)
-   | Val of Types.t Env.t (** a map from Memory/Reg to a type *)
+   | Val of Types.t Env.t (** a map from Memory/Reg to a type. Be careful: a key not in the Env map means a TOP value ! *)
 
  let init () = Val (Env.empty)
 
+ let is_bot m = m = BOT
+     
  let top = Val (Env.empty)
 
  let join env1 env2 =

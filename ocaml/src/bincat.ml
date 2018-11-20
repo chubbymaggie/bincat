@@ -18,12 +18,24 @@
 
 Printf.printf "BinCAT %s\n" Bincat_ver.version_string;
 flush stdout;
-if (Array.length Sys.argv < 4) then
-        print_endline "Usage: bincat init.ini output.ini outlog"
-else
-  try
-    Main.process Sys.argv.(1) Sys.argv.(2) Sys.argv.(3)
-  with e ->
-      Printf.fprintf stderr "EXCEPTION: %s\nCheck log file for details [%s]\n" (Printexc.to_string e) Sys.argv.(3);
-      raise e
 
+let anon_args = ref [] in
+
+(* parse command line arguments *)
+let speclist = [
+    "--ignore-unknown-relocations", Arg.Unit (fun () -> Config.argv_options.Config.ignore_unknown_relocations := Some true),
+    "Ignore unknown relocations when loading binary instead of aborting" ;
+  ] in
+let usage = "usage: bincat init.ini output.ini outlog" in
+Arg.parse speclist (fun x -> anon_args := x :: !anon_args) usage;
+
+match !anon_args with
+| logfile::outputfile::configfile::[] ->
+   begin
+     try
+       Main.process configfile outputfile logfile
+     with e ->
+           Printf.fprintf stderr "EXCEPTION: %s\nCheck log file for details [%s]\n" (Printexc.to_string e) Sys.argv.(3);
+           raise e
+   end
+| _ ->  raise (Arg.Bad (Printf.sprintf "expected 3 arguments. Found %i." (List.length !anon_args)))
